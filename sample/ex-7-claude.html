@@ -1,0 +1,139 @@
+<local-event-script
+    id="splash-controller"
+    data-signals:splashState="'hidden'"
+    data-signals:exchangeRate="null"
+    data-signals:rateStatus="'idle'"
+>
+    <!-- ═══════════════════════════════════════════════
+       LIFECYCLE HOOKS
+       Rule: lifecycle hooks always fire events.
+       Events have handlers. Handlers call commands.
+    ═══════════════════════════════════════════════ -->
+
+    <on-load run="fire splash:init"></on-load>
+    <on-enter run="fire splash:entered"></on-enter>
+    <on-exit run="fire splash:exited"></on-exit>
+
+    <!-- ═══════════════════════════════════════════════
+       EVENT HANDLERS
+    ═══════════════════════════════════════════════ -->
+
+    <on-event
+        name="splash:init"
+        handle="`
+      set $splashState to 'entering'
+      then
+        fade-in  #splash  200ms ease-out and
+        slide-up #splash  180ms ease-out
+      then fire splash:ready
+    `"
+    ></on-event>
+
+    <on-event
+        name="splash:ready"
+        handle="`
+      set $splashState to 'visible'
+      then wait 3s
+      then call splash:hide
+    `"
+    ></on-event>
+
+    <!--
+     splash:entered fires when the element scrolls into view.
+     Different from splash:init (which fires on DOM load).
+     Could re-animate on re-entry, or do something subtler.
+     -->
+    <on-event
+        name="splash:entered"
+        handle="`
+      set $splashState to 'entering'
+      then
+        fade-in  #splash  150ms ease-out and
+        slide-up #splash  130ms ease-out
+      then fire splash:ready
+    `"
+    ></on-event>
+
+    <on-event name="splash:exited" handle="call splash:hide"></on-event>
+
+    <!--
+      Server can set $splashState = 'dismiss' via SSE patch-signals.
+      The when guard prevents firing on every $splashState write.
+      -->
+    <on-signal
+        name="$splashState"
+        when="$splashState == 'dismiss'"
+        handle="fire splash:dismissed"
+    ></on-signal>
+
+    <on-event name="splash:dismissed" handle="call splash:hide"></on-event>
+
+    <!--
+      app:boot comes from outside (server or other LES instance).
+      We hide the splash, then broadcast to the DOM that boot is done.
+      broadcast = fire with bubbles:true + composed:true.
+      Any data-on:app:booted listener in the document will hear it.
+    -->
+    <on-event
+        name="app:boot"
+        handle="`
+      call splash:hide
+      then broadcast app:booted
+    `"
+    ></on-event>
+
+    <!-- ═══════════════════════════════════════════════
+       COMMANDS
+    ═══════════════════════════════════════════════ -->
+
+    <command
+        name="splash:hide"
+        do="`
+      guard $splashState != 'exiting' and $splashState != 'hidden'
+      set $splashState to 'exiting'
+      then
+        fade-out    #splash.visible  200ms ease-in and
+        slide-down  #splash.visible  180ms ease-in
+      then
+        set $splashState to 'hidden'
+        then fire splash:hidden
+    `"
+    ></command>
+
+    <command
+        name="fetch-rate"
+        args="[from:str  to:str]"
+        do="`
+      set $rateStatus to 'pending'
+      then response <- @get '/api/exchange' [from: from  to: to]
+      then match response
+        [it   ok   ] ->
+          set $exchangeRate to it.rate
+          set $rateStatus   to 'resolved'
+          then fire rate:updated [$exchangeRate]
+        [nil  error] ->
+          set $rateStatus to 'rejected'
+          then fire rate:failed [$error]
+      /match
+    `"
+    ></command>
+
+    <command
+        name="fetch-rate:retry"
+        args="[from:str  to:str  attempt:int=0]"
+        do="`
+      match attempt
+        [0 | 1 | 2] ->
+          set $rateStatus to 'pending'
+          try
+            call fetch-rate [from: from  to: to]
+          on-fail
+            wait (attempt + 1) * 500ms
+            then call fetch-rate:retry [from: from  to: to  attempt: attempt + 1]
+          /try
+        [_] ->
+          fire rate:exhausted [from: from  to: to]
+      /match
+    `"
+    ></command>
+</local-event-script>

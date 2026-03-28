@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>local-event-script — Phase 0 checkpoint</title>
+
+  <!--
+    importmap: tells the browser where "datastar" lives.
+    The LES bundle itself does NOT include Datastar — it references it
+    by the bare specifier "datastar" which resolves via this map.
+  -->
+  <script type="importmap">
+    {
+      "imports": {
+        "datastar": "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js"
+      }
+    }
+  </script>
+
+  <!--
+    LES plugin — loaded after the importmap so "datastar" resolves correctly.
+    Phase 0: all elements register, Datastar bridge connects.
+    Phase 8: <use-module> loads animation primitives.
+  -->
+  <script type="module" src="/dist/local-event-script.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 860px;
+      margin: 2rem auto;
+      padding: 0 1.5rem;
+      color: #222;
+    }
+
+    h1 { font-size: 1.4rem; font-weight: 500; margin-bottom: 0.25rem; }
+    .subtitle { color: #666; font-size: 0.9rem; margin-bottom: 2rem; }
+
+    .checkpoint {
+      background: #f0f4ff;
+      border-left: 3px solid #5563de;
+      padding: 0.75rem 1rem;
+      border-radius: 0 6px 6px 0;
+      margin-bottom: 2rem;
+      font-size: 0.875rem;
+    }
+    .checkpoint strong { color: #3a47c9; }
+
+    /* Simulate feed items for later phases */
+    .feed-item {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .feed-item .badge {
+      background: #e0f2fe;
+      color: #0369a1;
+      border-radius: 4px;
+      padding: 0.2rem 0.5rem;
+      font-size: 0.75rem;
+      white-space: nowrap;
+    }
+    .feed-item.is-new    { border-color: #6ee7b7; }
+    .feed-item.is-updated { border-color: #fbbf24; }
+    .feed-item.is-stale  { opacity: 0.4; }
+
+    .feed-controls {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .feed-controls button {
+      padding: 0.4rem 0.9rem;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .feed-controls button:hover { background: #f9fafb; }
+
+    #debug-log {
+      background: #111;
+      color: #c8ffa7;
+      font-family: monospace;
+      font-size: 0.78rem;
+      padding: 1rem;
+      border-radius: 6px;
+      height: 220px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Plain <script> runs before any type="module" scripts.
+     This guarantees console.log is intercepted before LES elements
+     fire their connectedCallback logs. -->
+<script>
+  (function() {
+    var buffer = [];
+    var origLog = console.log.bind(console);
+
+    function flush(line) {
+      var el = document.getElementById('debug-log');
+      if (el) {
+        // drain any buffered lines first
+        if (buffer.length) {
+          el.textContent += buffer.join('\n') + '\n';
+          buffer = [];
+        }
+        el.textContent += line + '\n';
+        el.scrollTop = el.scrollHeight;
+      } else {
+        buffer.push(line);
+      }
+    }
+
+    console.log = function() {
+      origLog.apply(console, arguments);
+      var args = Array.prototype.slice.call(arguments);
+      // Only intercept [LES...] and [demo] messages
+      var first = args[0];
+      if (typeof first === 'string' && (first.startsWith('[LES') || first.startsWith('[demo'))) {
+        var line = args.map(function(a) {
+          return typeof a === 'object' ? JSON.stringify(a) : String(a);
+        }).join(' ');
+        flush(line);
+      }
+    };
+
+    // Flush buffer once DOM is ready (handles logs that fired before #debug-log existed)
+    document.addEventListener('DOMContentLoaded', function() {
+      var el = document.getElementById('debug-log');
+      if (el && buffer.length) {
+        el.textContent = buffer.join('\n') + '\n';
+        el.scrollTop = el.scrollHeight;
+        buffer = [];
+      }
+    });
+  })();
+</script>
+
+<h1>local-event-script</h1>
+<p class="subtitle">Browser-local event choreography runtime · Phase 0 checkpoint</p>
+
+<div class="checkpoint">
+  <strong>Phase 0 checkpoint</strong> — open DevTools console. You should see:
+  <ul>
+    <li><code>[LES] &lt;local-event-script&gt; initializing  activity-feed</code></li>
+    <li>One <code>[LES] &lt;use-module&gt; declared</code> line per module</li>
+    <li>One <code>[LES] &lt;local-command&gt; registered</code> line per command</li>
+    <li>One <code>[LES] &lt;on-event&gt; registered</code> line per event handler</li>
+    <li>One <code>[LES] &lt;on-signal&gt; registered</code> line per signal watcher</li>
+    <li><code>[LES:datastar] bridge registered</code> (Datastar found via importmap)</li>
+    <li>DevTools Elements panel: all custom elements appear as proper nodes</li>
+  </ul>
+  No errors. No unexpected behavior.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     THE CANONICAL EXAMPLE
+     This is the activity-feed LES definition. In Phase 0 it does nothing —
+     all children register and log, nothing executes yet.
+════════════════════════════════════════════════════════════════════════════ -->
+
+<local-event-script
+  id="activity-feed"
+  data-signals:feedState="'idle'"
+  data-signals:feedItems="[]"
+  data-signals:activeFilter="'all'"
+>
+
+  <!-- Vocabulary imports -->
+  <use-module type="animation"></use-module>
+  <use-module src="./scroll-effects.js"></use-module>
+  <use-module src="./spring-physics.js"></use-module>
+
+  <!-- Lifecycle -->
+  <on-load  run="emit feed:init"></on-load>
+  <on-enter when="$feedState == 'paused'" run="emit feed:resumed"></on-enter>
+  <on-exit  run="emit feed:paused"></on-exit>
+
+  <!-- Event handlers -->
+  <on-event name="feed:init" handle="`
+    set $feedState to 'loading'
+    then call feed:fetch [filter: $activeFilter]
+  `"></on-event>
+
+  <on-event name="feed:paused"  handle="set $feedState to 'paused'"></on-event>
+  <on-event name="feed:resumed" handle="`
+    set $feedState to 'loading'
+    then call feed:fetch [filter: $activeFilter]
+  `"></on-event>
+
+  <on-signal
+    name="$feedItems"
+    when="$feedState == 'live'"
+    handle="emit feed:server-pushed [$feedItems]"
+  ></on-signal>
+
+  <on-signal
+    name="$activeFilter"
+    when="$feedState == 'live'"
+    handle="emit feed:filter-changed [$activeFilter]"
+  ></on-signal>
+
+  <on-event name="feed:filter-changed" handle="`
+    call feed:exit-all
+    then call feed:fetch [filter: $activeFilter]
+  `"></on-event>
+
+  <on-event name="feed:data-ready" handle="`
+    set $feedState to 'live'
+    then call feed:enter-items
+    then broadcast feed:ready
+  `"></on-event>
+
+  <on-event name="feed:server-pushed" handle="`
+    call feed:update-items
+    then call feed:exit-stale-items
+    then call feed:enter-new-items
+  `"></on-event>
+
+  <on-event name="item:dismissed" handle="`
+    call feed:exit-item [$event.detail.id]
+    then broadcast item:dismissed [$event.detail.id]
+  `"></on-event>
+
+  <on-event name="feed:error" handle="`
+    set $feedState to 'error'
+    then broadcast feed:error [$error]
+  `"></on-event>
+
+  <!-- Commands -->
+  <local-command
+    name="feed:fetch"
+    args="[filter:str]"
+    guard="$feedState != 'loading'"
+    do="`
+      set $feedState to 'loading'
+      try
+        response <- @get '/api/feed' [filter: filter]
+        then match response
+          [it   ok   ] ->
+            set $feedItems to it.items
+            then emit feed:data-ready
+          [nil  error] ->
+            emit feed:error [$error]
+        /match
+      rescue
+        emit feed:error ['network-failure']
+      afterwards
+        match $feedState
+          ['error'] -> set $feedState to 'error'
+          [_]       -> set $feedState to 'live'
+        /match
+      /try
+    `"
+  ></local-command>
+
+  <local-command name="feed:enter-items" do="`
+    stagger-enter .feed-item        120ms ease-out [gap: 40ms  from: right]
+  `"></local-command>
+
+  <local-command name="feed:enter-new-items" do="`
+    stagger-enter .feed-item.is-new 120ms ease-out [gap: 30ms  from: right]
+  `"></local-command>
+
+  <local-command name="feed:update-items" do="`
+    pulse .feed-item.is-updated  300ms ease-in-out
+  `"></local-command>
+
+  <local-command name="feed:exit-all" do="`
+    stagger-exit .feed-item          80ms ease-in [gap: 20ms  direction: reverse]
+  `"></local-command>
+
+  <local-command name="feed:exit-stale-items" do="`
+    stagger-exit .feed-item.is-stale 80ms ease-in [gap: 20ms]
+  `"></local-command>
+
+  <local-command name="feed:exit-item" args="[id:str]" do="`
+    slide-out [data-item-id: id]  150ms ease-in [to: right]
+  `"></local-command>
+
+</local-event-script>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     VISIBLE DEMO CONTENT (for later phases — inert in Phase 0)
+════════════════════════════════════════════════════════════════════════════ -->
+
+<div class="feed-controls">
+  <button onclick="simulateFilter('all')">Filter: all</button>
+  <button onclick="simulateFilter('unread')">Filter: unread</button>
+  <button onclick="simulateFilter('mentions')">Filter: mentions</button>
+  <button onclick="simulateServerPush()">Simulate server push</button>
+  <button onclick="simulateDismiss()">Dismiss item 1</button>
+</div>
+
+<div id="feed-container">
+  <div class="feed-item is-new"     data-item-id="1"><span class="badge">new</span>     Server deployed to production</div>
+  <div class="feed-item is-updated" data-item-id="2"><span class="badge">updated</span> PR #42 merged by @alice</div>
+  <div class="feed-item"            data-item-id="3">                                   Build pipeline passed (12 tests)</div>
+  <div class="feed-item is-stale"   data-item-id="4"><span class="badge">stale</span>   Scheduled job completed</div>
+</div>
+
+<hr style="margin: 2rem 0; border: none; border-top: 1px solid #e5e7eb;">
+<p style="font-size: 0.8rem; color: #999;">Debug log (console.log intercepted)</p>
+<div id="debug-log"></div>
+
+
+<script>
+  // Simulation helpers — plain global functions, visible to button onclick handlers
+  window.simulateFilter = function(filter) {
+    console.log('[demo] Filter changed → "' + filter + '"');
+  };
+  window.simulateServerPush = function() {
+    console.log('[demo] Server push simulated');
+  };
+  window.simulateDismiss = function() {
+    console.log('[demo] Item 1 dismissed');
+  };
+</script>
+
+</body>
+</html>

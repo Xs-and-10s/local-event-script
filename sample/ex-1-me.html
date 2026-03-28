@@ -1,0 +1,44 @@
+<local-event-script
+    id="handle-splash"
+    state="ready"
+    data-on:event.name-1="`fire event.name-2 []`"
+    local-command:event.name-2="`
+        fade-in 200 exponential #splash.absent and
+        slide-up 180 exponential #$_ then
+        fire event.name-3 []
+    `"
+    local-on:event.name-3="`call splash-fade-out() []`"
+    local-command:splash-fade-out()[]="`
+        fade-out 200 exponential #splash.visible and
+        slide-down 180 exponential #$_ then
+        call evt.next() []
+    `"
+    next="`call command.boot-ai-agent() []`"
+>
+    <local-variables key="value"></local-variables>
+    <on-page-loaded></on-page-loaded>
+    <on-entered></on-entered>
+    <on-updated></on-updated>
+    <on-exited
+        trigger-1="`on $@get:exchange-rate-stored [$from-currency $to-currency $input]`"
+        step-1="`
+            fun getExchangeRate(float)[from:str to:str input:json]
+        `"
+        command-1="`
+            do
+                let rates be the rates of the input's data
+                let euro be 1 / rates[from]
+                get euro * rates[to]
+                return [it resolved]
+            handle error
+                return [nil rejected]
+        `"
+        result-1="`
+            let [rate status] match
+                [_ pending] -> [nil pending]
+                [it resolved] -> [rate status]
+                [nil rejected] -> [nil rejected]
+            return [rate status]
+        `"
+    ></on-exited>
+</local-event-script>

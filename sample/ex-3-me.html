@@ -1,0 +1,166 @@
+<!--
+  SETUP: signal initial state + Datastar bridge
+  The LES element has its own local scope.
+  data-signals can pre-seed global Datastar signals.
+-->
+<local-event-script
+    id="splash-controller"
+    data-signals:splashState="'hidden'"
+    data-signals:exchangeRate="null"
+    data-signals:rateStatus="'idle'"
+>
+    <!-- ═══════════════════════════════════════════════
+        LIFECYCLE HOOKS
+    ═══════════════════════════════════════════════ -->
+
+    <!-- fires when the element enters the DOM / DOMContentLoaded -->
+    <on-load run="fire splash:init"></on-load>
+
+    <!-- IntersectionObserver: fires when @_ enters the viewport -->
+    <on-enter run="fire splash:revealed [threshold: 0.2]"></on-enter>
+
+    <!-- IntersectionObserver: fires when @_ exits viewport -->
+    <on-exit run="call splash:hide"></on-exit>
+
+    <!-- ═══════════════════════════════════════════════
+        EVENT HANDLERS  (events already happened — cannot fail)
+    ═══════════════════════════════════════════════ -->
+
+    <on-event
+        name="splash:init"
+        handle="`
+        set $splashState to 'entering'
+        then
+            fade-in  #splash      200ms ease-out and
+            slide-up #splash      180ms ease-out
+        then fire splash:ready
+      `"
+    >
+    </on-event>
+
+    <on-event
+        name="splash:ready"
+        handle="`
+        set $splashState to 'visible'
+        then wait 3s
+        then call splash:hide
+      `"
+    >
+    </on-event>
+
+    <!--
+        Server-triggered: Datastar SSE patches $splashState → 'dismiss'
+        This bridges server authority back into the local event chain.
+        `when` guard prevents firing on every $splashState change.
+    -->
+    <on-signal
+        name="$splashState"
+        when="$splashState == 'dismiss'"
+        handle="
+        fire splash:dismissed []
+      "
+    >
+    </on-signal>
+
+    <on-event
+        name="splash:dismissed"
+        handle="
+        call splash:hide
+      "
+    >
+    </on-event>
+
+    <!-- ═══════════════════════════════════════════════
+        COMMANDS  (imperatives — can fail, have typed args)
+    ═══════════════════════════════════════════════ -->
+
+    <!--
+        No args needed — hide is self-contained.
+        Result propagates via events, not return values.
+    -->
+    <command
+        name="splash:hide"
+        do="`
+        set $splashState to 'exiting'
+        then
+          fade-out    #splash.visible  200ms ease-in and
+          slide-down  #splash.visible  180ms ease-in
+        then
+          set $splashState to 'hidden'
+          then fire splash:hidden
+      `"
+    >
+    </command>
+
+    <!--
+        Typed args. `dec` for floats, `str` for strings.
+        Named-argument call style mirrors Speakeazy keyword messages:
+            call fetch-rate [from: $baseCurrency  to: $targetCurrency]
+    -->
+    <command
+        name="fetch-rate"
+        args="[from:str  to:str]"
+        do="`
+        set $rateStatus to 'pending'
+        then response awaits @get '/api/exchange' [from: from  to: to]
+        then match response
+          [it  ok    ] ->
+            set $exchangeRate  to it.rate
+            set $rateStatus    to 'resolved'
+            then fire rate:updated [$exchangeRate]
+          [nil  error ] ->
+            set $rateStatus to 'rejected'
+            then fire rate:failed  [$error]
+      `"
+    >
+    </command>
+
+    <!--
+        Retry with exponential backoff — shows `wait` + recursion
+        `int` arg with default value.
+    -->
+    <command
+        name="fetch-rate:retry"
+        args="[from:str  to:str  attempt:int=0]"
+        do="`
+        match attempt
+          [0 | 1 | 2] ->
+            call fetch-rate [from: from  to: to]
+            then on-fail
+              wait (attempt + 1) * 500ms
+              then call fetch-rate:retry [from: from  to: to  attempt: attempt + 1]
+          [_] ->
+            fire rate:exhausted [from: from  to: to]
+      `"
+    >
+    </command>
+
+    <!-- ═══════════════════════════════════════════════
+        COMPOSED SEQUENCE — shows fire! bubbling
+        The `!` suffix on fire lets the event bubble up
+        so external data-on: listeners can catch it.
+    ═══════════════════════════════════════════════ -->
+
+    <on-event
+        name="app:boot"
+        handle="`
+        call splash:hide
+        then fire! app:booted []
+      `"
+    >
+    </on-event>
+
+    <!-- ═══════════════════════════════════════════════
+        DATASTAR BRIDGE — wiring LES ↔ Datastar
+        These live outside <local-event-script> on
+        the elements they target, using normal Datastar
+        attributes. LES fires CustomEvents; Datastar hears them.
+    ═══════════════════════════════════════════════ -->
+    <!--
+    (shown here in a comment for documentation clarity)
+
+        data-on:splash:hidden="@post('/api/session/splash-dismissed')"
+        data-on:rate:updated="$displayRate = $exchangeRate.toFixed(4)"
+        data-on:rate:failed="$errorMsg = 'Rate fetch failed'"
+    -->
+</local-event-script>

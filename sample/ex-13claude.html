@@ -1,0 +1,204 @@
+<local-event-script
+    id="activity-feed"
+    data-signals:feedState="'idle'"
+    data-signals:feedItems="[]"
+    data-signals:activeFilter="'all'"
+>
+    <!-- ═══════════════════════════════════════════════
+       VOCABULARY IMPORTS
+       type="..."  →  built-in LES module
+       src="..."   →  userland / custom module
+       Both attributes are independent and combinable.
+  ═══════════════════════════════════════════════ -->
+
+    <use-module type="animation"></use-module>
+    <use-module src="./scroll-effects.js"></use-module>
+
+    <!-- ═══════════════════════════════════════════════
+       LIFECYCLE
+  ═══════════════════════════════════════════════ -->
+
+    <on-load run="emit feed:init"></on-load>
+    <on-enter when="$feedState == 'paused'" run="emit feed:resumed"></on-enter>
+    <on-exit run="emit feed:paused"></on-exit>
+
+    <!-- ═══════════════════════════════════════════════
+       EVENT HANDLERS
+  ═══════════════════════════════════════════════ -->
+
+    <on-event
+        name="feed:init"
+        handle="`
+    set $feedState to 'loading'
+    then call feed:fetch [filter: $activeFilter]
+  `"
+    ></on-event>
+
+    <on-event name="feed:paused" handle="set $feedState to 'paused'"></on-event>
+    <on-event
+        name="feed:resumed"
+        handle="`
+    set $feedState to 'loading'
+    then call feed:fetch [filter: $activeFilter]
+  `"
+    ></on-event>
+
+    <!--
+    Server pushes new items via SSE patch-signals on $feedItems.
+    Guard: only react when feed is live, not loading or paused.
+  -->
+    <on-signal
+        name="$feedItems"
+        when="$feedState == 'live'"
+        handle="emit feed:server-pushed [$feedItems]"
+    ></on-signal>
+
+    <!--
+    Filter changes cycle through: exit all → fetch → re-enter.
+    Guard: skip during initial load ($feedState == 'idle').
+  -->
+    <on-signal
+        name="$activeFilter"
+        when="$feedState == 'live'"
+        handle="emit feed:filter-changed [$activeFilter]"
+    ></on-signal>
+
+    <on-event
+        name="feed:filter-changed"
+        handle="`
+    call feed:exit-all
+    then call feed:fetch [filter: $activeFilter]
+  `"
+    ></on-event>
+
+    <!--
+    Data arrived — initial load or post-filter-change.
+    D3 "enter" phase trigger.
+  -->
+    <on-event
+        name="feed:data-ready"
+        handle="`
+    set $feedState to 'live'
+    then call feed:enter-items
+    then broadcast feed:ready
+  `"
+    ></on-event>
+
+    <!--
+    Server pushed a diff: some items new, some updated, some stale.
+    D3 full update/exit/enter cycle.
+  -->
+    <on-event
+        name="feed:server-pushed"
+        handle="`
+    call feed:update-items
+    then call feed:exit-stale-items
+    then call feed:enter-new-items
+  `"
+    ></on-event>
+
+    <!--
+    User dismissed a single item.
+    broadcast lets external Datastar listeners react (e.g. badge counter).
+  -->
+    <on-event
+        name="item:dismissed"
+        handle="`
+    call feed:exit-item [$event.detail.id]
+    then broadcast item:dismissed [$event.detail.id]
+  `"
+    ></on-event>
+
+    <on-event
+        name="feed:error"
+        handle="`
+    set $feedState to 'error'
+    then broadcast feed:error [$error]
+  `"
+    ></on-event>
+
+    <!-- ═══════════════════════════════════════════════
+       COMMANDS
+  ═══════════════════════════════════════════════ -->
+
+    <!--
+    fetch-rate: the only command with real async + error surface.
+    Demonstrates: try / rescue / afterwards / /try
+    and the rule for when to use match vs ternary:
+      → branches contain statements (set, emit) → use match, not ternary
+  -->
+    <local-command
+        name="feed:fetch"
+        args="[filter:str]"
+        guard="$feedState != 'loading'"
+        do="`
+      set $feedState to 'loading'
+      try
+        response <- @get '/api/feed' [filter: filter]
+        then match response
+          [it   ok   ] ->
+            set $feedItems to it.items
+            then emit feed:data-ready
+          [nil  error] ->
+            emit feed:error [$error]
+        /match
+      rescue
+        emit feed:error ['network-failure']
+      afterwards
+        match $feedState
+          ['error'] -> set $feedState to 'error'
+          [_]       -> set $feedState to 'live'
+        /match
+      /try
+    `"
+    ></local-command>
+
+    <!-- ─── D3 enter phase ─────────────────────────── -->
+
+    <local-command
+        name="feed:enter-items"
+        do="`
+      stagger-enter .feed-item        120ms ease-out [gap: 40ms  from: right]
+    `"
+    ></local-command>
+
+    <local-command
+        name="feed:enter-new-items"
+        do="`
+      stagger-enter .feed-item.is-new 120ms ease-out [gap: 30ms  from: right]
+    `"
+    ></local-command>
+
+    <!-- ─── D3 update phase ────────────────────────── -->
+
+    <local-command
+        name="feed:update-items"
+        do="`
+      pulse .feed-item.is-updated  300ms ease-in-out
+    `"
+    ></local-command>
+
+    <!-- ─── D3 exit phase ─────────────────────────── -->
+
+    <local-command
+        name="feed:exit-all"
+        do="`
+      stagger-exit .feed-item          80ms ease-in [gap: 20ms  direction: reverse]
+    `"
+    ></local-command>
+
+    <local-command
+        name="feed:exit-stale-items"
+        do="`
+      stagger-exit .feed-item.is-stale 80ms ease-in [gap: 20ms]
+    `"
+    ></local-command>
+
+    <local-command
+        name="feed:exit-item"
+        args="[id:str]"
+        do="`
+      slide-out [data-item-id: id]  150ms ease-in [to: right]
+    `"
+    ></local-command>
+</local-event-script>

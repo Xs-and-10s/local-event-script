@@ -1,0 +1,210 @@
+<local-event-script
+    id="activity-feed"
+    data-signals:feedState="'idle'"
+    data-signals:feedItems="[]"
+    data-signals:activeFilter="'all'"
+>
+    <!-- ═══════════════════════════════════════════════
+       LIFECYCLE
+       on-enter only re-fires when feed was paused
+       (e.g. user scrolled away and back)
+  ═══════════════════════════════════════════════ -->
+
+    <on-load run="emit feed:init"></on-load>
+    <on-enter when="$feedState == 'paused'" run="emit feed:resumed"></on-enter>
+    <on-exit run="emit feed:paused"></on-exit>
+
+    <!-- ═══════════════════════════════════════════════
+       EVENT HANDLERS
+  ═══════════════════════════════════════════════ -->
+
+    <on-event
+        name="feed:init"
+        handle="`
+    set $feedState to 'loading'
+    then call feed:fetch [filter: $activeFilter]
+  `"
+    ></on-event>
+
+    <!--
+    feed:paused/resumed manage the live subscription lifecycle.
+    No animation needed — state change only.
+  -->
+    <on-event name="feed:paused" handle="set $feedState to 'paused'"></on-event>
+    <on-event
+        name="feed:resumed"
+        handle="`
+    set $feedState to 'loading'
+    then call feed:fetch [filter: $activeFilter]
+  `"
+    ></on-event>
+
+    <!--
+    Server pushes new items via SSE patch-signals on $feedItems.
+    Guard: only react when we're actually live, not loading/paused.
+  -->
+    <on-signal
+        name="$feedItems"
+        when="$feedState == 'live'"
+        handle="emit feed:server-pushed [$feedItems]"
+    ></on-signal>
+
+    <!--
+    Filter changes: exit everything, fetch fresh set, re-enter.
+    Guard: skip during initial load (feedState == 'idle').
+  -->
+    <on-signal
+        name="$activeFilter"
+        when="$feedState == 'live'"
+        handle="emit feed:filter-changed [$activeFilter]"
+    ></on-signal>
+
+    <on-event
+        name="feed:filter-changed"
+        handle="`
+    call feed:exit-all
+    then call feed:fetch [filter: $activeFilter]
+  `"
+    ></on-event>
+
+    <!--
+    Data arrived from server (initial load or filter change).
+    D3 "enter" phase.
+  -->
+    <on-event
+        name="feed:data-ready"
+        handle="`
+    set $feedState to 'live'
+    then call feed:enter-items
+    then broadcast feed:ready
+  `"
+    ></on-event>
+
+    <!--
+    Server pushed a diff — some items new, some updated, some gone.
+    D3 "update" phase.
+  -->
+    <on-event
+        name="feed:server-pushed"
+        handle="`
+    call feed:update-items
+    then call feed:exit-stale-items
+    then call feed:enter-new-items
+  `"
+    ></on-event>
+
+    <!--
+    A single item dismissed by the user.
+    Emits up to broadcast so other components (e.g. a counter badge)
+    can react to the dismissal.
+  -->
+    <on-event
+        name="item:dismissed"
+        handle="`
+    call feed:exit-item [$event.detail.id]
+    then broadcast item:dismissed [$event.detail.id]
+  `"
+    ></on-event>
+
+    <on-event
+        name="feed:error"
+        handle="`
+    set $feedState to 'error'
+    then broadcast feed:error [$error]
+  `"
+    ></on-event>
+
+    <!-- ═══════════════════════════════════════════════
+       COMMANDS
+  ═══════════════════════════════════════════════ -->
+
+    <!--
+    Fetch with retry on failure.
+    guard prevents double-fetching if already in-flight.
+  -->
+    <local-command
+        name="feed:fetch"
+        args="[filter:str]"
+        guard="$feedState != 'loading'"
+        do="`
+      set $feedState to 'loading'
+      try
+        response <- @get '/api/feed' [filter: filter]
+        then match response
+          [it   ok   ] ->
+            set $feedItems to it.items
+            then emit feed:data-ready
+          [nil  error] ->
+            emit feed:error [$error]
+        /match
+      on-fail
+        emit feed:error ['network-failure']
+      /try
+    `"
+    ></local-command>
+
+    <!--
+    D3 "enter" — stagger new items in from the right.
+    stagger-enter is a built-in LES animation primitive:
+    runs slide-right on each .feed-item in sequence with a delay gap.
+  -->
+    <local-command
+        name="feed:enter-items"
+        do="`
+      stagger-enter .feed-item  120ms ease-out [gap: 40ms  from: right]
+    `"
+    ></local-command>
+
+    <local-command
+        name="feed:enter-new-items"
+        do="`
+      stagger-enter .feed-item.is-new  120ms ease-out [gap: 30ms  from: right]
+    `"
+    ></local-command>
+
+    <!--
+    D3 "update" — pulse items whose content changed.
+    CSS class .is-updated is set by the server's patch-elements.
+  -->
+    <local-command
+        name="feed:update-items"
+        do="`
+      pulse .feed-item.is-updated  300ms ease-in-out
+    `"
+    ></local-command>
+
+    <!--
+    D3 "exit" — slide all items out to the left (e.g. on filter change).
+    After animation completes, the items are removed from the DOM
+    by the subsequent @get response.
+  -->
+    <local-command
+        name="feed:exit-all"
+        do="`
+      stagger-exit .feed-item  80ms ease-in [gap: 20ms  direction: reverse]
+    `"
+    ></local-command>
+
+    <!--
+    D3 "exit" — slide stale items out individually.
+    .is-stale class set by server's patch-elements before we animate.
+  -->
+    <local-command
+        name="feed:exit-stale-items"
+        do="`
+      stagger-exit .feed-item.is-stale  80ms ease-in [gap: 20ms]
+    `"
+    ></local-command>
+
+    <!--
+    Single-item exit by ID.
+    Uses CSS attribute selector to target exactly one item.
+  -->
+    <local-command
+        name="feed:exit-item"
+        args="[id:str]"
+        do="`
+      slide-out [data-item-id: id]  150ms ease-in [to: right]
+    `"
+    ></local-command>
+</local-event-script>
