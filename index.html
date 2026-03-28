@@ -154,17 +154,16 @@
 <p class="subtitle">Browser-local event choreography runtime · Phase 0 checkpoint</p>
 
 <div class="checkpoint">
-  <strong>Phase 0 checkpoint</strong> — open DevTools console. You should see:
+  <strong>Phase 2 checkpoint</strong> — debug log should show:
   <ul>
     <li><code>[LES] &lt;local-event-script&gt; initializing  activity-feed</code></li>
-    <li>One <code>[LES] &lt;use-module&gt; declared</code> line per module</li>
-    <li>One <code>[LES] &lt;local-command&gt; registered</code> line per command</li>
-    <li>One <code>[LES] &lt;on-event&gt; registered</code> line per event handler</li>
-    <li>One <code>[LES] &lt;on-signal&gt; registered</code> line per signal watcher</li>
-    <li><code>[LES:datastar] bridge registered</code> (Datastar found via importmap)</li>
-    <li>DevTools Elements panel: all custom elements appear as proper nodes</li>
+    <li><code>[LES] config read for #activity-feed</code> with counts for each category</li>
+    <li><code>[LES] parser: 18/18 bodies parsed successfully</code> (zero errors)</li>
+    <li><code>[LES] AST preview (feed:fetch):</code> followed by JSON starting with <code>{"type":"sequence"...</code></li>
+    <li><code>[LES:datastar] bridge registered</code></li>
   </ul>
-  No errors. No unexpected behavior.
+  In the browser console, type: <code>document.querySelector('local-event-script').parsed</code>
+  to inspect the full AST for every command and event handler.
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════

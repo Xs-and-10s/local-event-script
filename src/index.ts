@@ -42,3 +42,8 @@ export { LESScope }                       from '@runtime/scope.js'
 // Dynamic import so the bundle works without Datastar present.
 import { registerDatastarBridge } from '@datastar/plugin.js'
 registerDatastarBridge()
+export type { LESConfig, CommandDecl, EventHandlerDecl, SignalWatcherDecl,
+              OnLoadDecl, OnEnterDecl, OnExitDecl, ModuleDecl } from '@parser/config.js'
+export { readConfig, logConfig } from '@parser/reader.js'
+export { stripBody }             from '@parser/stripBody.js'
+export { parseLES, LESParser, LESParseError } from '@parser/index.js'
