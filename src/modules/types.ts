@@ -91,7 +91,12 @@ export async function loadModule(
 
   if (opts.src) {
     try {
-      const mod = await import(/* @vite-ignore */ opts.src)
+      // Resolve relative paths against the page URL, not the bundle URL.
+      // Without this, './scroll-effects.js' resolves to '/dist/scroll-effects.js'
+      // (relative to the bundle at /dist/local-event-script.js) instead of
+      // '/scroll-effects.js' (relative to the HTML page).
+      const resolvedSrc = new URL(opts.src, document.baseURI).href
+      const mod = await import(/* @vite-ignore */ resolvedSrc)
       if (!mod.default || typeof mod.default.primitives !== 'object') {
         console.warn(`[LES] Module at "${opts.src}" does not export a valid LESModule. Expected: { name: string, primitives: Record<string, Function> }`)
         return

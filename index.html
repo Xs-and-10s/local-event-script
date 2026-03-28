@@ -220,7 +220,9 @@
   ></on-signal>
 
   <on-event name="feed:filter-changed" handle="`
-    call feed:exit-all
+    set $feedState to 'filtering'
+    then set $activeFilter to payload[0]
+    then call feed:exit-all
     then call feed:fetch [filter: $activeFilter]
   `"></on-event>
 
@@ -274,27 +276,27 @@
   ></local-command>
 
   <local-command name="feed:enter-items" do="`
-    stagger-enter .feed-item        120ms ease-out [gap: 40ms  from: right]
+    stagger-enter .feed-item        320ms cubic-bezier(0.22,1,0.36,1) [gap: 55ms  from: right]
   `"></local-command>
 
   <local-command name="feed:enter-new-items" do="`
-    stagger-enter .feed-item.is-new 120ms ease-out [gap: 30ms  from: right]
+    stagger-enter .feed-item.is-new 280ms cubic-bezier(0.22,1,0.36,1) [gap: 45ms  from: right]
   `"></local-command>
 
   <local-command name="feed:update-items" do="`
-    pulse .feed-item.is-updated  300ms ease-in-out
+    pulse .feed-item.is-updated  480ms ease-in-out
   `"></local-command>
 
   <local-command name="feed:exit-all" do="`
-    stagger-exit .feed-item          80ms ease-in [gap: 20ms  direction: reverse]
+    stagger-exit .feed-item          200ms ease-in [gap: 30ms  direction: reverse]
   `"></local-command>
 
   <local-command name="feed:exit-stale-items" do="`
-    stagger-exit .feed-item.is-stale 80ms ease-in [gap: 20ms]
+    stagger-exit .feed-item.is-stale 180ms ease-in [gap: 25ms]
   `"></local-command>
 
   <local-command name="feed:exit-item" args="[id:str]" do="`
-    slide-out [data-item-id: id]  150ms ease-in [to: right]
+    slide-out [data-item-id: id]  240ms cubic-bezier(0.4,0,1,1) [to: right]
   `"></local-command>
 
 </local-event-script>
@@ -329,8 +331,54 @@
 
 
 <script>
+  // ─── Mock /api/feed endpoint ───────────────────────────────────────────────
+  // Intercepts fetch calls to /api/feed so the demo works without a backend.
+  // Returns filtered feed items as JSON.
+  (function() {
+    const ALL_ITEMS = [
+      { id: '1', text: 'Server deployed to production', tags: ['all'], cls: 'is-new' },
+      { id: '2', text: 'PR #42 merged by @alice',       tags: ['all', 'mentions'], cls: 'is-updated' },
+      { id: '3', text: 'Build pipeline passed (12 tests)', tags: ['all', 'unread'], cls: '' },
+      { id: '4', text: 'Scheduled job completed',       tags: ['all'], cls: 'is-stale' },
+    ];
+
+    const origFetch = window.fetch.bind(window);
+    window.fetch = function(url, opts) {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.includes('/api/feed')) {
+        const params = new URL(urlStr, location.href).searchParams;
+        const filter = params.get('filter') || 'all';
+        const items = ALL_ITEMS.filter(item => item.tags.includes(filter));
+        console.log('[mock] GET /api/feed?filter=' + filter + ' → ' + items.length + ' items');
+        return Promise.resolve(new Response(JSON.stringify({ items }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        }));
+      }
+      return origFetch(url, opts);
+    };
+  })();
+</script>
+
+<script>
   // Simulation helpers — plain global functions, visible to button onclick handlers
   function les() { return document.querySelector('local-event-script') }
+
+  // Listen for feed:ready broadcast to update visible items based on filter
+  document.addEventListener('feed:ready', function() {
+    const filter = les().signal('activeFilter') || 'all';
+    const filterMap = {
+      'all':      ['1','2','3','4'],
+      'unread':   ['3'],
+      'mentions': ['2'],
+    };
+    const visibleIds = filterMap[filter] || ['1','2','3','4'];
+    document.querySelectorAll('.feed-item').forEach(function(el) {
+      const id = el.getAttribute('data-item-id');
+      el.style.display = visibleIds.includes(id) ? '' : 'none';
+    });
+    console.log('[demo] feed:ready — showing ids:', visibleIds, 'for filter:', filter);
+  });
 
   window.simulateFilter = function(filter) {
     console.log('[demo] Firing feed:filter-changed: ' + filter);

@@ -23,15 +23,24 @@ import type { LESModule, LESPrimitive } from '../types.js'
 
 function queryAll(selector: string, host: Element): Element[] {
   try {
-    // Search from the document root so animation targets can be anywhere in
-    // the DOM — not just inside the <local-event-script> host element.
-    // This mirrors how CSS selectors work: scope is the document, not a subtree.
     const root = host.getRootNode() as Document | ShadowRoot
     const scope = root instanceof Document ? root : root.ownerDocument ?? document
     return Array.from(scope.querySelectorAll(selector))
   } catch {
     console.warn(`[LES:animation] Invalid selector: "${selector}"`)
     return []
+  }
+}
+
+/**
+ * Cancel all running Web Animations on an element before starting a new one.
+ * This prevents the one-frame flash that occurs when a fill:forwards animation
+ * is interrupted — without cancellation, the element briefly reverts to its
+ * un-animated state as the old Animation is replaced.
+ */
+function cancelAnimations(el: Element): void {
+  for (const anim of (el as HTMLElement).getAnimations()) {
+    anim.cancel()
   }
 }
 
@@ -42,6 +51,8 @@ async function animateAll(
   options: KeyframeAnimationOptions
 ): Promise<void> {
   if (els.length === 0) return
+  // Cancel any in-progress or fill:forwards animations first so we start clean.
+  els.forEach(cancelAnimations)
   await Promise.all(
     els.map(el => (el as HTMLElement).animate(keyframes, options).finished)
   )
@@ -54,7 +65,7 @@ async function animateAll(
 type Direction = 'left' | 'right' | 'up' | 'down'
 
 function slideKeyframes(dir: Direction, entering: boolean): Keyframe[] {
-  const distance = '40px'
+  const distance = '60px'
   const translations: Record<Direction, string> = {
     left:  `translateX(-${distance})`,
     right: `translateX(${distance})`,
@@ -149,6 +160,7 @@ const staggerEnter: LESPrimitive = async (selector, duration, easing, opts, host
   const gap  = parseMs(opts['gap'] as string | number | undefined, 40)
   const from = (opts['from'] as Direction | undefined) ?? 'right'
 
+  els.forEach(cancelAnimations)
   await Promise.all(
     els.map((el, i) =>
       (el as HTMLElement).animate(
@@ -168,7 +180,11 @@ const staggerEnter: LESPrimitive = async (selector, duration, easing, opts, host
  *   to: dir           — exit direction (default: 'left')
  */
 const staggerExit: LESPrimitive = async (selector, duration, easing, opts, host) => {
-  let els = queryAll(selector, host)
+  // Filter to only elements that are actually visible — skip hidden/already-exited ones
+  let els = queryAll(selector, host).filter(el => {
+    const style = window.getComputedStyle(el as HTMLElement)
+    return style.display !== 'none' && style.visibility !== 'hidden'
+  })
   if (els.length === 0) return
 
   const gap     = parseMs(opts['gap'] as string | number | undefined, 20)
@@ -177,6 +193,7 @@ const staggerExit: LESPrimitive = async (selector, duration, easing, opts, host)
 
   if (reverse) els = [...els].reverse()
 
+  els.forEach(cancelAnimations)
   await Promise.all(
     els.map((el, i) =>
       (el as HTMLElement).animate(
