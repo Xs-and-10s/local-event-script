@@ -23,7 +23,12 @@ import type { LESModule, LESPrimitive } from '../types.js'
 
 function queryAll(selector: string, host: Element): Element[] {
   try {
-    return Array.from(host.querySelectorAll(selector))
+    // Search from the document root so animation targets can be anywhere in
+    // the DOM — not just inside the <local-event-script> host element.
+    // This mirrors how CSS selectors work: scope is the document, not a subtree.
+    const root = host.getRootNode() as Document | ShadowRoot
+    const scope = root instanceof Document ? root : root.ownerDocument ?? document
+    return Array.from(scope.querySelectorAll(selector))
   } catch {
     console.warn(`[LES:animation] Invalid selector: "${selector}"`)
     return []

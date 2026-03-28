@@ -285,6 +285,14 @@ export function evalExpr(node: ExprNode, ctx: LESContext): unknown {
   if (node.raw === 'false') return false
   if (node.raw === 'null' || node.raw === 'nil') return null
 
+  // ── Fast paths for common animation/option value patterns ──────────────
+  // These are not valid JS expressions but appear frequently as option values:
+  //   "20ms" → duration literal (returned as-is for parseMs() to handle)
+  //   "reverse", "right", "left", "up", "down" → direction keywords
+  //   Any bare word (no spaces, no operators) → return as string
+  if (/^\d+(\.\d+)?ms$/.test(node.raw)) return node.raw   // duration literal
+  if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(node.raw)) return node.raw  // bare identifier
+
   try {
     // Build a flat object of all accessible names:
     // - Scope locals (innermost wins)

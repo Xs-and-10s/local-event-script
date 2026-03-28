@@ -186,6 +186,7 @@
 
   <!-- Vocabulary imports -->
   <use-module type="animation"></use-module>
+  <!-- userland module examples — stubs in scroll-effects.js / spring-physics.js -->
   <use-module src="./scroll-effects.js"></use-module>
   <use-module src="./spring-physics.js"></use-module>
 
@@ -236,8 +237,8 @@
   `"></on-event>
 
   <on-event name="item:dismissed" handle="`
-    call feed:exit-item [$event.detail.id]
-    then broadcast item:dismissed [$event.detail.id]
+    call feed:exit-item [id: event.detail.id]
+    then broadcast item:dismissed [event.detail.id]
   `"></on-event>
 
   <on-event name="feed:error" handle="`
@@ -341,8 +342,9 @@
   };
   window.simulateDismiss = function() {
     console.log('[demo] Firing item:dismissed id=1');
+    // detail.id is read by: call feed:exit-item [id: event.detail.id]
     les().dispatchEvent(new CustomEvent('item:dismissed', {
-      detail: { payload: ['1'], id: '1' }, bubbles: false
+      detail: { id: '1', payload: [] }, bubbles: false
     }));
   };
   window.simulateBoot = function() {
