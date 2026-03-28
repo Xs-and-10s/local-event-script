@@ -154,16 +154,17 @@
 <p class="subtitle">Browser-local event choreography runtime · Phase 0 checkpoint</p>
 
 <div class="checkpoint">
-  <strong>Phase 2 checkpoint</strong> — debug log should show:
+  <strong>Phase 3/4 checkpoint</strong> — debug log should show:
   <ul>
-    <li><code>[LES] &lt;local-event-script&gt; initializing  activity-feed</code></li>
-    <li><code>[LES] config read for #activity-feed</code> with counts for each category</li>
-    <li><code>[LES] parser: 18/18 bodies parsed successfully</code> (zero errors)</li>
-    <li><code>[LES] AST preview (feed:fetch):</code> followed by JSON starting with <code>{"type":"sequence"...</code></li>
-    <li><code>[LES:datastar] bridge registered</code></li>
+    <li><code>[LES] parser: 20/20 bodies parsed successfully</code></li>
+    <li><code>[LES] registered 7 commands</code></li>
+    <li><code>[LES] wired event handler: "feed:init"</code> (× 8 handlers)</li>
+    <li><code>[LES] emit "feed:init"</code> — on-load fires immediately</li>
+    <li><code>[LES] $feedState = loading</code> — first signal write</li>
+    <li><code>[LES] ready: activity-feed</code></li>
   </ul>
-  In the browser console, type: <code>document.querySelector('local-event-script').parsed</code>
-  to inspect the full AST for every command and event handler.
+  Then use the buttons below to test live event firing. In the console:
+  <code>document.querySelector('local-event-script').fire('feed:data-ready')</code>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
@@ -304,6 +305,7 @@
   <button onclick="simulateFilter('mentions')">Filter: mentions</button>
   <button onclick="simulateServerPush()">Simulate server push</button>
   <button onclick="simulateDismiss()">Dismiss item 1</button>
+  <button onclick="simulateBoot()">Boot (app:boot)</button>
 </div>
 
 <div id="feed-container">
@@ -320,14 +322,26 @@
 
 <script>
   // Simulation helpers — plain global functions, visible to button onclick handlers
+  function les() { return document.querySelector('local-event-script') }
+
   window.simulateFilter = function(filter) {
-    console.log('[demo] Filter changed → "' + filter + '"');
+    console.log('[demo] Firing feed:filter-changed with filter: ' + filter);
+    les().fire('feed:filter-changed', [filter]);
   };
   window.simulateServerPush = function() {
-    console.log('[demo] Server push simulated');
+    console.log('[demo] Firing feed:server-pushed');
+    les().fire('feed:server-pushed', []);
   };
   window.simulateDismiss = function() {
-    console.log('[demo] Item 1 dismissed');
+    console.log('[demo] Firing item:dismissed with id: 1');
+    les().fire('item:dismissed', []).then ? undefined : undefined;
+    les().dispatchEvent(new CustomEvent('item:dismissed', {
+      detail: { payload: [], id: '1' }, bubbles: false
+    }));
+  };
+  window.simulateBoot = function() {
+    console.log('[demo] Firing app:boot');
+    les().fire('app:boot');
   };
 </script>
 
