@@ -154,17 +154,21 @@
 <p class="subtitle">Browser-local event choreography runtime · Phase 0 checkpoint</p>
 
 <div class="checkpoint">
-  <strong>Phase 3/4 checkpoint</strong> — debug log should show:
+  <strong>Phase 5–7 checkpoint</strong> — debug log should show:
   <ul>
-    <li><code>[LES] parser: 20/20 bodies parsed successfully</code></li>
-    <li><code>[LES] registered 7 commands</code></li>
-    <li><code>[LES] wired event handler: "feed:init"</code> (× 8 handlers)</li>
-    <li><code>[LES] emit "feed:init"</code> — on-load fires immediately</li>
-    <li><code>[LES] $feedState = loading</code> — first signal write</li>
+    <li><code>[LES] IntersectionObserver attached  activity-feed</code></li>
+    <li><code>[LES] wired 2 signal watchers (local fallback)</code></li>
+    <li><code>[LES] emit "feed:init"</code> → <code>$feedState = loading</code></li>
     <li><code>[LES] ready: activity-feed</code></li>
   </ul>
-  Then use the buttons below to test live event firing. In the console:
-  <code>document.querySelector('local-event-script').fire('feed:data-ready')</code>
+  <strong>Animation tests</strong> — use the buttons below:
+  <ul>
+    <li><em>Enter items</em> — staggers .feed-item in from right</li>
+    <li><em>Exit all</em> — staggers .feed-item out in reverse</li>
+    <li><em>Pulse updated</em> — pulses .is-updated items</li>
+    <li><em>Dismiss item 1</em> — slides single item out</li>
+  </ul>
+  <em>Scroll the page so the feed goes off-screen, then back — on-enter/on-exit fires.</em>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
@@ -306,6 +310,9 @@
   <button onclick="simulateServerPush()">Simulate server push</button>
   <button onclick="simulateDismiss()">Dismiss item 1</button>
   <button onclick="simulateBoot()">Boot (app:boot)</button>
+  <button onclick="testEnterItems()" style="background:#e0f2fe">↓ Enter items</button>
+  <button onclick="testExitAll()"   style="background:#fce7f3">↑ Exit all</button>
+  <button onclick="testPulse()"     style="background:#fef3c7">✦ Pulse updated</button>
 </div>
 
 <div id="feed-container">
@@ -325,7 +332,7 @@
   function les() { return document.querySelector('local-event-script') }
 
   window.simulateFilter = function(filter) {
-    console.log('[demo] Firing feed:filter-changed with filter: ' + filter);
+    console.log('[demo] Firing feed:filter-changed: ' + filter);
     les().fire('feed:filter-changed', [filter]);
   };
   window.simulateServerPush = function() {
@@ -333,15 +340,26 @@
     les().fire('feed:server-pushed', []);
   };
   window.simulateDismiss = function() {
-    console.log('[demo] Firing item:dismissed with id: 1');
-    les().fire('item:dismissed', []).then ? undefined : undefined;
+    console.log('[demo] Firing item:dismissed id=1');
     les().dispatchEvent(new CustomEvent('item:dismissed', {
-      detail: { payload: [], id: '1' }, bubbles: false
+      detail: { payload: ['1'], id: '1' }, bubbles: false
     }));
   };
   window.simulateBoot = function() {
     console.log('[demo] Firing app:boot');
     les().fire('app:boot');
+  };
+  window.testEnterItems = function() {
+    console.log('[demo] Calling feed:enter-items');
+    les().call('feed:enter-items');
+  };
+  window.testExitAll = function() {
+    console.log('[demo] Calling feed:exit-all');
+    les().call('feed:exit-all');
+  };
+  window.testPulse = function() {
+    console.log('[demo] Calling feed:update-items');
+    les().call('feed:update-items');
   };
 </script>
 

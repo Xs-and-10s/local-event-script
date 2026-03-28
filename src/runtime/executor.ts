@@ -427,11 +427,16 @@ function matchSingle(
 /**
  * Performs an HTTP action (@get, @post, etc.).
  *
- * For Phase 3: uses native fetch directly.
- * Phase 6 will swap this for Datastar's @action system when available,
- * which adds signal serialization, SSE response handling, etc.
+ * When Datastar actions are available in the host's context, we trigger
+ * Datastar's fetch pipeline (which handles signal serialization, SSE
+ * response processing, and indicator signals).
  *
- * Returns the parsed JSON response body, or throws on network/HTTP error.
+ * Falls back to native fetch when Datastar is not present.
+ *
+ * Note: Datastar's @get / @post are fire-and-forget (they stream SSE back
+ * to patch signals/elements). For the bind case (`response <- @get ...`)
+ * we use native fetch to get a Promise-based JSON response that LES can
+ * bind to a local variable.
  */
 async function performAction(
   verb: string,
@@ -445,7 +450,6 @@ async function performAction(
   let body: string | undefined
 
   if (method === 'GET' || method === 'DELETE') {
-    // Args as query params
     const params = new URLSearchParams()
     for (const [k, v] of Object.entries(args)) {
       params.set(k, String(v))
@@ -473,7 +477,6 @@ async function performAction(
   if (contentType.includes('application/json')) {
     return await response.json()
   }
-
   return await response.text()
 }
 

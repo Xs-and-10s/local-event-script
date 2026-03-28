@@ -2,11 +2,9 @@ import { CommandRegistry } from '@runtime/registry.js'
 import { ModuleRegistry, loadModule } from '@modules/types.js'
 import { readConfig, logConfig } from '@parser/reader.js'
 import { parseLES } from '@parser/index.js'
-import { buildContext } from '@runtime/wiring.js'
-import {
-  registerCommands, wireEventHandlers, fireOnLoad,
-  type ParsedWiring,
-} from '@runtime/wiring.js'
+import { buildContext, registerCommands, wireEventHandlers, fireOnLoad, type ParsedWiring } from '@runtime/wiring.js'
+import { wireIntersectionObserver } from '@runtime/observer.js'
+import { notifySignalWatchers, wireSignalWatcherViaDatastar } from '@runtime/signals.js'
 import type { LESConfig } from '@parser/config.js'
 import type { LESNode } from '@parser/ast.js'
 import type { LESContext } from '@runtime/executor.js'
@@ -15,21 +13,23 @@ export class LocalEventScript extends HTMLElement {
   readonly commands = new CommandRegistry()
   readonly modules  = new ModuleRegistry()
 
-  private _config:  LESConfig | null = null
+  private _config:  LESConfig | null  = null
   private _wiring:  ParsedWiring | null = null
   private _ctx:     LESContext | null = null
-  private _cleanup: (() => void) | null = null
 
-  // ─── Simple fallback signal store (replaced by Datastar bridge in Phase 6) ─
+  // Cleanup fns accumulated during _init — all called in _teardown
+  private _cleanups: Array<() => void> = []
+
+  // Simple fallback signal store (Datastar bridge replaces reads/writes in Phase 6)
   private _signals: Map<string, unknown> = new Map()
 
-  // ─── Datastar bridge ───────────────────────────────────────────────────────
+  // Datastar bridge (populated in Phase 6 via attribute plugin)
   private _dsEffect: ((fn: () => void) => void) | undefined = undefined
   private _dsSignal: (<T>(name: string, init?: T) => { value: T }) | undefined = undefined
 
-  get config():  LESConfig | null  { return this._config }
+  get config():  LESConfig | null    { return this._config }
   get wiring():  ParsedWiring | null { return this._wiring }
-  get context(): LESContext | null { return this._ctx }
+  get context(): LESContext | null   { return this._ctx }
 
   static get observedAttributes(): string[] { return [] }
 
@@ -50,35 +50,51 @@ export class LocalEventScript extends HTMLElement {
     this._config = readConfig(this)
     logConfig(this._config)
 
-    // Phase 8: load modules (do this before parsing so primitive names resolve)
+    // Phase 8: load modules before parsing so primitive names resolve
     await this._loadModules(this._config)
 
     // Phase 2: parse body strings → AST
     this._wiring = this._parseAll(this._config)
 
-    // Phase 4: build context + register commands + wire event handlers
+    // Phase 4: build context, register commands, wire event handlers
     this._ctx = buildContext(
       this,
       this.commands,
       this.modules,
-      {
-        get: (k) => this._getSignal(k),
-        set: (k, v) => this._setSignal(k, v),
-      }
+      { get: k => this._getSignal(k), set: (k, v) => this._setSignal(k, v) }
     )
 
     registerCommands(this._wiring, this.commands)
 
-    this._cleanup = wireEventHandlers(
-      this._wiring,
-      this,
-      () => this._ctx!
+    this._cleanups.push(
+      wireEventHandlers(this._wiring, this, () => this._ctx!)
     )
 
-    // Phase 5: IntersectionObserver (on-enter / on-exit) — coming next
-    // Phase 6: Datastar signal watchers (on-signal) — coming after IO
+    // Phase 5a: IntersectionObserver for on-enter / on-exit
+    this._cleanups.push(
+      wireIntersectionObserver(
+        this,
+        this._wiring.lifecycle.onEnter,
+        this._wiring.lifecycle.onExit,
+        () => this._ctx!
+      )
+    )
 
-    // Fire on-load last — everything else must be wired first
+    // Phase 5b: signal watchers
+    // If Datastar is connected use its reactive effect() system;
+    // otherwise the local _setSignal path calls notifySignalWatchers directly.
+    if (this._dsEffect) {
+      for (const watcher of this._wiring.watchers) {
+        wireSignalWatcherViaDatastar(watcher, this._dsEffect, () => this._ctx!)
+      }
+      console.log(`[LES] wired ${this._wiring.watchers.length} signal watchers via Datastar`)
+    } else {
+      console.log(`[LES] wired ${this._wiring.watchers.length} signal watchers (local fallback)`)
+    }
+
+    // Phase 6: Datastar bridge full activation — coming next
+
+    // on-load fires last, after everything is wired
     await fireOnLoad(this._wiring, () => this._ctx!)
 
     console.log('[LES] ready:', this.id || '(no id)')
@@ -86,21 +102,19 @@ export class LocalEventScript extends HTMLElement {
 
   private _teardown(): void {
     console.log('[LES] <local-event-script> disconnected', this.id || '(no id)')
-    this._cleanup?.()
-    this._cleanup = null
-    this._config  = null
-    this._wiring  = null
-    this._ctx     = null
+    for (const cleanup of this._cleanups) cleanup()
+    this._cleanups = []
+    this._config   = null
+    this._wiring   = null
+    this._ctx      = null
   }
 
   // ─── Signal store ─────────────────────────────────────────────────────────
 
   private _getSignal(name: string): unknown {
-    // Phase 6: if Datastar is connected, read from its signal store
+    // Phase 6: prefer Datastar signal tree when bridge is connected
     if (this._dsSignal) {
-      try {
-        return this._dsSignal(name).value
-      } catch { /* fall through to local store */ }
+      try { return this._dsSignal(name).value } catch { /* fall through */ }
     }
     return this._signals.get(name)
   }
@@ -109,26 +123,27 @@ export class LocalEventScript extends HTMLElement {
     const prev = this._signals.get(name)
     this._signals.set(name, value)
     console.log(`[LES] $${name} =`, value)
-    // Phase 6: propagate to Datastar signal tree
-    // Phase 5: notify on-signal watchers
-    if (prev !== value) {
-      this._notifySignalWatchers(name, value)
-    }
-  }
 
-  private _notifySignalWatchers(name: string, _value: unknown): void {
-    // Phase 5: check each on-signal watcher's when guard and execute if it passes
-    // Stubbed here — Phase 5 fills this in
+    // Phase 6: write through to Datastar's reactive graph
+    if (this._dsSignal) {
+      try {
+        const sig = this._dsSignal<unknown>(name, value)
+        sig.value = value
+      } catch { /* signal may not exist in Datastar yet */ }
+    }
+
+    // Phase 5b: notify local signal watchers (fallback path when Datastar absent)
+    if (prev !== value && this._wiring && this._ctx && !this._dsEffect) {
+      notifySignalWatchers(name, this._wiring.watchers, () => this._ctx!)
+    }
   }
 
   // ─── Module loading ───────────────────────────────────────────────────────
 
   private async _loadModules(config: LESConfig): Promise<void> {
-    const moduleDecls = config.modules
-    if (moduleDecls.length === 0) return
-
+    if (config.modules.length === 0) return
     await Promise.all(
-      moduleDecls.map(decl =>
+      config.modules.map(decl =>
         loadModule(this.modules, {
           ...(decl.type ? { type: decl.type } : {}),
           ...(decl.src  ? { src:  decl.src  } : {}),
@@ -144,7 +159,11 @@ export class LocalEventScript extends HTMLElement {
 
     const tryParse = (body: string, label: string): LESNode => {
       try { ok++; return parseLES(body) }
-      catch (e) { fail++; console.error(`[LES] Parse error in ${label}:`, e); return { type: 'expr', raw: '' } }
+      catch (e) {
+        fail++
+        console.error(`[LES] Parse error in ${label}:`, e)
+        return { type: 'expr', raw: '' }
+      }
     }
 
     const wiring: ParsedWiring = {
@@ -191,18 +210,25 @@ export class LocalEventScript extends HTMLElement {
   get dsEffect() { return this._dsEffect }
   get dsSignal()  { return this._dsSignal }
 
-  /** Public API: fire a named event into this LES instance from outside */
+  // ─── Public API ───────────────────────────────────────────────────────────
+
+  /** Fire a named local event into this LES instance from outside. */
   fire(event: string, payload: unknown[] = []): void {
     this.dispatchEvent(new CustomEvent(event, {
       detail: { payload }, bubbles: false, composed: false,
     }))
   }
 
-  /** Public API: call a command from outside (e.g. from browser console) */
+  /** Call a command by name from outside (e.g. browser console, tests). */
   async call(command: string, args: Record<string, unknown> = {}): Promise<void> {
     if (!this._ctx) { console.warn('[LES] not initialized yet'); return }
     const { runCommand } = await import('@runtime/executor.js')
     await runCommand(command, args, this._ctx)
+  }
+
+  /** Read a signal value directly (for debugging). */
+  signal(name: string): unknown {
+    return this._getSignal(name)
   }
 }
 
