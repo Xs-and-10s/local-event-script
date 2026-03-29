@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LES — Splash Screen Demo</title>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "datastar": "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js"
+      }
+    }
+  </script>
+  <script type="module" src="/dist/local-event-script.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      background: #0f1117;
+      color: #e2e4ec;
+      overflow: hidden; /* no scrollbar during splash */
+    }
+
+    /* ── Splash overlay ─────────────────────────────────────────────────── */
+    /* Covers the full viewport. CSS initial state: fully visible.         */
+    /* LES animates it OUT after the entrance sequence completes.          */
+
+    #splash {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: #0f1117;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.5rem;
+    }
+
+    #splash-logo {
+      /* starts invisible — LES fade-in animates it in */
+      opacity: 0;
+    }
+
+    #splash-logo svg {
+      width: 64px;
+      height: 64px;
+    }
+
+    #splash-wordmark {
+      /* starts below and invisible — LES slide-up + fade-in animates it in */
+      opacity: 0;
+      transform: translateY(24px);
+      text-align: center;
+    }
+
+    #splash-wordmark h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.35rem;
+      color: #e2e4ec;
+    }
+
+    #splash-wordmark p {
+      font-size: 0.85rem;
+      color: #6b7280;
+      margin: 0;
+      letter-spacing: 0.02em;
+    }
+
+    #splash-progress {
+      /* subtle loading bar at bottom of splash */
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      height: 2px;
+      background: linear-gradient(90deg, #7c6cf7, #4ade80);
+      width: 0%;
+      opacity: 0;
+      transition: width 2s linear, opacity 0.3s;
+    }
+
+    #splash-progress.running {
+      opacity: 1;
+      width: 100%;
+    }
+
+    /* ── App content (revealed after splash exits) ───────────────────── */
+    /* Starts fully transparent — the app:ready handler fades it in.     */
+
+    #app {
+      opacity: 0;
+      transform: translateY(8px);
+      padding: 3rem 2rem;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2.5rem;
+    }
+
+    .nav a {
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.8rem;
+    }
+    .nav a:hover { color: #e2e4ec; }
+
+    .nav .brand {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #7c6cf7;
+      letter-spacing: 0.05em;
+      font-variant: small-caps;
+    }
+
+    .hero {
+      margin-bottom: 2.5rem;
+    }
+
+    .hero h2 {
+      font-size: 2rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.25;
+      margin: 0 0 0.75rem;
+    }
+
+    .hero p {
+      color: #9ca3af;
+      font-size: 0.95rem;
+      line-height: 1.6;
+      max-width: 480px;
+      margin: 0 0 1.5rem;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 1rem;
+    }
+
+    .card {
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 10px;
+      padding: 1.25rem;
+      opacity: 0;
+      transform: translateY(12px);
+    }
+
+    .card-icon { font-size: 1.4rem; margin-bottom: 0.6rem; }
+    .card h3   { font-size: 0.875rem; font-weight: 600; margin: 0 0 0.3rem; }
+    .card p    { font-size: 0.78rem; color: #6b7280; line-height: 1.4; margin: 0; }
+
+    /* ── Back link ──────────────────────────────────────────────────────── */
+
+    #back-link {
+      position: fixed;
+      top: 1.25rem;
+      left: 1.5rem;
+      font-size: 0.8rem;
+      color: #6b7280;
+      text-decoration: none;
+      z-index: 200;
+      transition: color 0.15s;
+    }
+    #back-link:hover { color: #e2e4ec; }
+
+    /* ── Replay button ───────────────────────────────────────────────── */
+
+    #replay-btn {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      padding: 0.5rem 1rem;
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+      color: #9ca3af;
+      font-size: 0.8rem;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.3s, border-color 0.15s;
+      z-index: 50;
+    }
+    #replay-btn.visible { opacity: 1; }
+    #replay-btn:hover { border-color: #7c6cf7; color: #e2e4ec; }
+
+    /* ── Debug log ────────────────────────────────────────────────────── */
+    #debug-wrap {
+      position: fixed;
+      bottom: 1.5rem;
+      left: 1.5rem;
+      width: min(360px, calc(100vw - 3rem));
+      opacity: 0;
+      transition: opacity 0.4s;
+      z-index: 50;
+    }
+    #debug-wrap.visible { opacity: 1; }
+    #debug-label { font-size: 0.65rem; color: #4b5563; margin-bottom: 0.25rem; }
+    #debug-log {
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(4px);
+      color: #6ee7b7;
+      font-family: monospace;
+      font-size: 0.7rem;
+      padding: 0.75rem;
+      border-radius: 6px;
+      height: 120px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      border: 1px solid #1a2e20;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Console log intercept (sync, before any modules) -->
+<script>
+(function() {
+  var buf = [];
+  var orig = console.log.bind(console);
+  function flush(line) {
+    var el = document.getElementById('debug-log');
+    if (el) {
+      if (buf.length) { el.textContent += buf.join('\n') + '\n'; buf = []; }
+      el.textContent += line + '\n';
+      el.scrollTop = el.scrollHeight;
+    } else buf.push(line);
+  }
+  console.log = function() {
+    orig.apply(console, arguments);
+    var a = Array.prototype.slice.call(arguments);
+    var f = a[0];
+    if (typeof f === 'string' && (f.startsWith('[LES') || f.startsWith('[demo'))) {
+      flush(a.map(function(x) { return typeof x === 'object' ? JSON.stringify(x) : String(x); }).join(' '));
+    }
+  };
+  document.addEventListener('DOMContentLoaded', function() {
+    var el = document.getElementById('debug-log');
+    if (el && buf.length) { el.textContent = buf.join('\n') + '\n'; buf = []; }
+  });
+})();
+</script>
+
+<a id="back-link" href="/">← demos</a>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     SPLASH OVERLAY — visible by default, LES animates it out
+════════════════════════════════════════════════════════════════════════ -->
+<div id="splash">
+  <div id="splash-logo">
+    <!-- Simple geometric logo mark -->
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="8"  y="8"  width="20" height="20" rx="4" fill="#7c6cf7"/>
+      <rect x="36" y="8"  width="20" height="20" rx="4" fill="#4ade80" opacity="0.7"/>
+      <rect x="8"  y="36" width="20" height="20" rx="4" fill="#4ade80" opacity="0.7"/>
+      <rect x="36" y="36" width="20" height="20" rx="4" fill="#7c6cf7" opacity="0.4"/>
+    </svg>
+  </div>
+
+  <div id="splash-wordmark">
+    <h1>local-event-script</h1>
+    <p>browser-local event choreography</p>
+  </div>
+
+  <div id="splash-progress"></div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     LES DEFINITION
+     All purely browser-local — zero server calls needed.
+════════════════════════════════════════════════════════════════════════ -->
+<local-event-script
+  id="splash-controller"
+  data-signals:splashState="'idle'"
+>
+  <use-module type="animation"></use-module>
+
+  <!-- LIFECYCLE -->
+  <on-load run="emit splash:init"></on-load>
+
+  <!-- EVENT HANDLERS -->
+
+  <!--
+    splash:init — entrance sequence.
+    Logo fades in simultaneously with the wordmark sliding up.
+    `and` = Promise.all (both animations run in parallel).
+    `then` = sequential await (next step waits for both to complete).
+  -->
+  <on-event
+    name="splash:init"
+    handle="`
+      set $splashState to 'entering'
+      then
+        fade-in  #splash-logo      400ms ease-out and
+        slide-up #splash-wordmark  360ms cubic-bezier(0.22,1,0.36,1)
+      then wait 1800ms
+      then emit splash:dismiss
+    `"
+  ></on-event>
+
+  <!--
+    splash:dismiss — exit sequence.
+    Logo and wordmark exit simultaneously, then the overlay fades out.
+    After the overlay exits, broadcast app:ready to the DOM.
+  -->
+  <on-event
+    name="splash:dismiss"
+    handle="`
+      set $splashState to 'exiting'
+      then
+        fade-out    #splash-logo      250ms ease-in and
+        slide-down  #splash-wordmark  220ms ease-in
+      then fade-out #splash 300ms ease-in
+      then set $splashState to 'hidden'
+      then broadcast app:ready
+    `"
+  ></on-event>
+
+</local-event-script>
+
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     APP CONTENT — starts invisible, fades in on app:ready
+════════════════════════════════════════════════════════════════════════ -->
+<div id="app">
+  <nav class="nav">
+    <span class="brand">LES</span>
+    <a href="https://github.com" target="_blank">GitHub</a>
+  </nav>
+
+  <div class="hero">
+    <h2>Splash Screen</h2>
+    <p>
+      A browser-local entrance sequence: parallel logo fade + wordmark slide,
+      a timed hold, then a chained exit — all without touching the server.
+      The <code>broadcast app:ready</code> at the end tells the rest of the
+      page it's safe to appear.
+    </p>
+  </div>
+
+  <div class="cards">
+    <div class="card" id="card-1">
+      <div class="card-icon">⟳</div>
+      <h3>then / and</h3>
+      <p>Sequential and parallel async composition. Both primitives are async-transparent.</p>
+    </div>
+    <div class="card" id="card-2">
+      <div class="card-icon">⏱</div>
+      <h3>wait</h3>
+      <p>Suspends the chain for a given duration. Just <code>setTimeout</code> wrapped in a Promise.</p>
+    </div>
+    <div class="card" id="card-3">
+      <div class="card-icon">📡</div>
+      <h3>broadcast</h3>
+      <p>Fires a DOM-wide <code>CustomEvent</code> with <code>bubbles: true, composed: true</code>.</p>
+    </div>
+    <div class="card" id="card-4">
+      <div class="card-icon">🎬</div>
+      <h3>on-load</h3>
+      <p>Fires once when the host element connects to the DOM. No IntersectionObserver needed.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Replay button — appears after splash exits -->
+<button id="replay-btn" onclick="replaySplash()">↺ Replay</button>
+
+<!-- Debug log — appears after splash exits -->
+<div id="debug-wrap">
+  <div id="debug-label">debug log</div>
+  <div id="debug-log"></div>
+</div>
+
+
+<script>
+  // ── React to app:ready broadcast ────────────────────────────────────────
+  // LES fires this after the splash overlay exits.
+  // We fade in the app content and stagger the cards.
+
+  document.addEventListener('app:ready', async function() {
+    console.log('[demo] app:ready received — revealing content');
+
+    const app = document.getElementById('app');
+    const cards = document.querySelectorAll('.card');
+    const splash = document.getElementById('splash');
+    const replayBtn = document.getElementById('replay-btn');
+    const debugWrap = document.getElementById('debug-wrap');
+
+    // Hide the splash element entirely so it doesn't intercept pointer events
+    if (splash) {
+      splash.style.pointerEvents = 'none';
+      // Give the fade-out animation a moment to finish, then hide completely
+      setTimeout(() => { splash.style.display = 'none'; }, 100);
+    }
+
+    // Allow page scrolling now
+    document.body.style.overflow = '';
+
+    // Fade in the app shell
+    if (app) {
+      app.animate(
+        [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }],
+        { duration: 400, easing: 'ease-out', fill: 'forwards' }
+      );
+    }
+
+    // Stagger the cards in
+    await new Promise(r => setTimeout(r, 120));
+    for (const [i, card] of Array.from(cards).entries()) {
+      setTimeout(() => {
+        card.animate(
+          [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }],
+          { duration: 320, easing: 'cubic-bezier(0.22,1,0.36,1)', fill: 'forwards' }
+        );
+      }, i * 70);
+    }
+
+    // Show replay button and debug log
+    setTimeout(() => {
+      if (replayBtn) replayBtn.classList.add('visible');
+      if (debugWrap) debugWrap.classList.add('visible');
+    }, 400);
+  });
+
+  // ── Replay ──────────────────────────────────────────────────────────────
+  // Reset all animated elements back to their initial state and re-run.
+  function replaySplash() {
+    const splash     = document.getElementById('splash');
+    const logo       = document.getElementById('splash-logo');
+    const wordmark   = document.getElementById('splash-wordmark');
+    const progress   = document.getElementById('splash-progress');
+    const app        = document.getElementById('app');
+    const cards      = document.querySelectorAll('.card');
+    const replayBtn  = document.getElementById('replay-btn');
+    const debugWrap  = document.getElementById('debug-wrap');
+    const debugLog   = document.getElementById('debug-log');
+
+    // Cancel any running animations
+    [splash, logo, wordmark, app, ...Array.from(cards)].forEach(el => {
+      if (el) el.getAnimations().forEach(a => a.cancel());
+    });
+
+    // Reset splash to fully visible
+    if (splash) {
+      splash.style.display = '';
+      splash.style.pointerEvents = '';
+      splash.style.opacity = '1';
+    }
+    if (logo)     { logo.style.opacity = '0'; }
+    if (wordmark) { wordmark.style.opacity = '0'; wordmark.style.transform = 'translateY(24px)'; }
+    if (progress) { progress.classList.remove('running'); }
+
+    // Reset app content to invisible
+    if (app) { app.style.opacity = '0'; app.style.transform = 'translateY(8px)'; }
+    cards.forEach(function(card) { card.style.opacity = '0'; card.style.transform = 'translateY(12px)'; });
+
+    // Hide replay button and debug log temporarily
+    if (replayBtn) replayBtn.classList.remove('visible');
+    if (debugWrap) debugWrap.classList.remove('visible');
+    if (debugLog)  debugLog.textContent = '';
+    document.body.style.overflow = 'hidden';
+
+    // Re-run the LES sequence
+    const les = document.querySelector('local-event-script');
+    if (les) {
+      // Reset signal state then re-fire the init event
+      setTimeout(() => {
+        les.fire('splash:init');
+        // Restart the progress bar
+        if (progress) {
+          void progress.offsetWidth; // reflow
+          progress.classList.add('running');
+        }
+      }, 50);
+    }
+  }
+
+  // Start the progress bar on load
+  document.addEventListener('DOMContentLoaded', function() {
+    const progress = document.getElementById('splash-progress');
+    if (progress) {
+      setTimeout(() => progress.classList.add('running'), 100);
+    }
+  });
+</script>
+
+</body>
+</html>
