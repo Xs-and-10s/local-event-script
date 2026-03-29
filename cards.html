@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LES — Card Interactions Demo</title>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "datastar": "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js"
+      }
+    }
+  </script>
+  <script type="module" src="/dist/local-event-script.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      --bg:      #0f1117;
+      --surface: #1a1d27;
+      --border:  #2a2d3a;
+      --text:    #e2e4ec;
+      --muted:   #6b7280;
+      --accent:  #7c6cf7;
+      --green:   #4ade80;
+      --amber:   #f59e0b;
+    }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.9rem 2rem;
+      border-bottom: 1px solid var(--border);
+    }
+    nav a       { color: var(--muted); text-decoration: none; font-size: 0.8rem; }
+    nav a:hover { color: var(--text); }
+    nav .brand  { font-size: 0.8rem; font-weight: 600; color: var(--accent);
+                  letter-spacing: 0.05em; font-variant: small-caps; }
+
+    /* ── Page header ── */
+    .page-header {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 3rem 2rem 1.5rem;
+    }
+
+    .page-header h1 {
+      font-size: 2rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.5rem;
+    }
+
+    .page-header p {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin: 0 0 1.25rem;
+      max-width: 520px;
+      line-height: 1.6;
+    }
+
+    /* ── Status bar: dismissed counter + reset button ── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .badge-counter {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .badge-counter .count {
+      font-weight: 700;
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+      min-width: 1ch;
+    }
+
+    .btn-reset {
+      padding: 0.35rem 0.85rem;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-reset:hover { border-color: var(--accent); color: var(--text); }
+
+    /* ── Card grid ── */
+    .card-grid {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1.25rem;
+    }
+
+    /* ── 3D flip card ─────────────────────────────────────────────────────
+       Perspective is on the outer .card.
+       .card-inner rotates — front and back are absolutely stacked.
+       LES toggles .is-flipped on .card via JS onclick.
+    ── */
+    .card {
+      height: 200px;
+      perspective: 900px;
+      cursor: pointer;
+      /* Start invisible — LES stagger-enter animates in on load */
+      opacity: 0;
+      transform: translateY(80px);
+    }
+
+    .card.is-dismissed {
+      display: none;
+    }
+
+    .card-inner {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transform-style: preserve-3d;
+      transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 12px;
+    }
+
+    .card.is-flipped .card-inner {
+      transform: rotateY(180deg);
+    }
+
+    .card-face {
+      position: absolute;
+      inset: 0;
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+      border-radius: 12px;
+      padding: 1.4rem;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-back {
+      transform: rotateY(180deg);
+      background: #131620;
+      border-color: rgba(124, 108, 247, 0.3);
+    }
+
+    /* Front face */
+    .card-icon   { font-size: 1.6rem; margin-bottom: 0.6rem; }
+    .card-title  {
+      font-size: 0.95rem;
+      font-weight: 600;
+      font-family: monospace;
+      color: var(--accent);
+      margin: 0 0 0.4rem;
+    }
+    .card-teaser {
+      font-size: 0.78rem;
+      color: var(--muted);
+      line-height: 1.45;
+      margin: 0;
+      flex: 1;
+    }
+    .card-hint {
+      font-size: 0.65rem;
+      color: #3d4060;
+      margin-top: auto;
+      padding-top: 0.5rem;
+    }
+
+    /* Back face */
+    .card-code {
+      font-family: monospace;
+      font-size: 0.72rem;
+      color: var(--green);
+      background: rgba(74, 222, 128, 0.05);
+      border: 1px solid rgba(74, 222, 128, 0.15);
+      border-radius: 6px;
+      padding: 0.6rem 0.75rem;
+      line-height: 1.6;
+      flex: 1;
+      max-height: 100px;
+      overflow-y: auto;
+      overflow-x: auto;
+      white-space: pre;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(74,222,128,0.25) transparent;
+    }
+    .card-code::-webkit-scrollbar       { width: 4px; height: 4px; }
+    .card-code::-webkit-scrollbar-track { background: transparent; }
+    .card-code::-webkit-scrollbar-thumb { background: rgba(74,222,128,0.25); border-radius: 2px; }
+
+    .card-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 0.75rem;
+    }
+
+    .card-flip-back {
+      font-size: 0.75rem;
+      color: var(--muted);
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 0;
+    }
+    .card-flip-back:hover { color: var(--text); }
+
+    .card-dismiss {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--accent);
+      background: rgba(124, 108, 247, 0.1);
+      border: 1px solid rgba(124, 108, 247, 0.25);
+      border-radius: 6px;
+      padding: 0.3rem 0.75rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .card-dismiss:hover { background: rgba(124, 108, 247, 0.2); }
+
+    /* ── All-dismissed completion state ── */
+    #complete-msg {
+      display: none;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 1rem 2rem 3rem;
+    }
+
+    #complete-msg.visible {
+      display: block;
+    }
+
+    .complete-box {
+      background: var(--surface);
+      border: 1px solid rgba(74, 222, 128, 0.3);
+      border-radius: 12px;
+      padding: 2.5rem;
+      text-align: center;
+      opacity: 0;
+      transform: translateY(20px);
+    }
+
+    .complete-box h2 { font-size: 1.4rem; font-weight: 600; margin: 0 0 0.5rem; }
+    .complete-box p  { color: var(--muted); font-size: 0.9rem; margin: 0 0 1.25rem; }
+    .complete-box code {
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: var(--green);
+      background: rgba(74, 222, 128, 0.08);
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+    }
+
+    .btn-start-over {
+      padding: 0.55rem 1.25rem;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-start-over:hover { opacity: 0.85; }
+
+    /* ── Les concepts label strip ── */
+    .concepts-used {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 2rem 3rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .concept-pill {
+      font-size: 0.68rem;
+      font-family: monospace;
+      padding: 0.2rem 0.55rem;
+      border-radius: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    /* View Transitions: smooth grid reflow when cards are dismissed.
+       The browser cross-fades each card to its new position automatically.
+       Individual card names allow the browser to track each one. */
+    ::view-transition-group(card-1),
+    ::view-transition-group(card-2),
+    ::view-transition-group(card-3),
+    ::view-transition-group(card-4),
+    ::view-transition-group(card-5),
+    ::view-transition-group(card-6) {
+      animation-duration: 400ms;
+      animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="/">← demos</a>
+  <span class="brand">LES</span>
+  <a href="https://github.com" target="_blank">GitHub</a>
+</nav>
+
+<!--
+  ═══════════════════════════════════════════════════════════════════════
+  LES DEFINITION — wraps everything it animates so IO has real height
+  ═══════════════════════════════════════════════════════════════════════
+-->
+<local-event-script
+  id="cards-controller"
+  data-signals:dismissedCount="0"
+  data-signals:cardsState="'loading'"
+>
+  <use-module type="animation"></use-module>
+
+  <!--
+    ══════════════════════════════════════════════════════
+    LIFECYCLE
+    ══════════════════════════════════════════════════════
+  -->
+  <on-load run="emit cards:initialized"></on-load>
+
+
+  <!--
+    ══════════════════════════════════════════════════════
+    COMMANDS — imperatives, present tense.
+    A command is a request that can be blocked by its guard.
+    Commands own the animation work.
+    ══════════════════════════════════════════════════════
+  -->
+
+  <!--
+    cards:enter — stagger all cards into view.
+    Guard: only runs from 'loading' or 'resetting' state,
+    so it can't fire twice concurrently.
+  -->
+  <local-command
+    name="cards:enter"
+    guard="$cardsState == 'loading' || $cardsState == 'resetting'"
+    do="`
+      stagger-enter .card  550ms cubic-bezier(0.22,1,0.36,1) [gap: 90ms  from: down]
+      then set $cardsState to 'live'
+    `"
+  ></local-command>
+
+  <!--
+    card:flip — pulse tactile feedback on the clicked card.
+    Guard: only while 'live'. Silently no-ops during load/reset.
+    args: id:str — the card's data-card-id value.
+  -->
+  <local-command
+    name="card:flip"
+    args="[id:str]"
+    guard="$cardsState == 'live'"
+    do="`
+      pulse [data-card-id: id]  180ms ease-in-out
+    `"
+  ></local-command>
+
+  <!--
+    card:exit — slide a card out to the right.
+    Guard: only while 'live'. Prevents double-exit during reset.
+    args: id:str — the card's data-card-id value.
+  -->
+  <local-command
+    name="card:exit"
+    args="[id:str]"
+    guard="$cardsState == 'live'"
+    do="`
+      slide-out [data-card-id: id]  320ms cubic-bezier(0.4,0,1,1) [to: right]
+    `"
+  ></local-command>
+
+  <!--
+    cards:restore — re-stagger all cards into view after a reset.
+    Called directly by the Reset button (a button issues a command,
+    not an event — it hasn't done anything yet when clicked).
+    Guard: only while 'live' or 'complete' — not mid-restore.
+  -->
+  <local-command
+    name="cards:restore"
+    guard="$cardsState == 'live' || $cardsState == 'complete'"
+    do="`
+      set $cardsState to 'resetting'
+      then set $dismissedCount to 0
+      then emit cards:restoring
+      then stagger-enter .card  550ms cubic-bezier(0.22,1,0.36,1) [gap: 90ms  from: down]
+      then set $cardsState to 'live'
+    `"
+  ></local-command>
+
+
+  <!--
+    completion-box:enter — fades the completion box into view.
+    Called by JS after the last card's View Transition finishes,
+    so card exit and box entrance never overlap.
+    Guard: only while 'complete'.
+  -->
+  <local-command
+    name="completion-box:enter"
+    guard="$cardsState == 'complete'"
+    do="`
+      fade-in #complete-box  500ms cubic-bezier(0.22,1,0.36,1)
+    `"
+  ></local-command>
+
+
+  <!--
+    ══════════════════════════════════════════════════════
+    EVENTS — facts, past tense.
+    An event records something that already happened.
+    Events cannot be prevented — they route to commands,
+    which decide whether to act.
+    ══════════════════════════════════════════════════════
+  -->
+
+  <!--
+    cards:initialized — the page loaded and cards are in the DOM.
+    Routes to cards:enter to begin the entrance animation.
+  -->
+  <on-event name="cards:initialized" handle="`
+    call cards:enter
+  `"></on-event>
+
+  <!--
+    card:flipped — a user flipped a card (JS toggled .is-flipped).
+    Routes to card:flip command for tactile pulse feedback.
+  -->
+  <on-event name="card:flipped" handle="`
+    call card:flip [id: payload[0]]
+  `"></on-event>
+
+  <!--
+    card:dismissed — a user dismissed a card.
+    Routes to card:exit command (guarded — live only).
+    On success: increments counter, then match branches:
+      [6] → all dismissed → emit cards:completed (new fact)
+      [_] → not yet       → broadcast card:dismissed (external fact)
+  -->
+  <on-event name="card:dismissed" handle="`
+    call card:exit [id: payload[0]]
+    then set $dismissedCount to $dismissedCount + 1
+    then match $dismissedCount
+      [6] ->
+        emit cards:completed
+      [_] ->
+        broadcast card:dismissed [payload[0]]
+    /match
+  `"></on-event>
+
+  <!--
+    cards:completed — all 6 cards have been dismissed.
+    Sets terminal state and emits cards:revealed so JS can
+    animate in the completion box.
+  -->
+  <on-event name="cards:completed" handle="`
+    set $cardsState to 'complete'
+    then emit cards:revealed
+  `"></on-event>
+
+  <!--
+    cards:restoring — the cards:restore command has begun its work.
+    JS listens for this to un-dismiss cards from the DOM before
+    the re-enter animation targets them.
+  -->
+  <on-event name="cards:restoring" handle="`
+    broadcast cards:restoring
+  `"></on-event>
+
+  <!-- Page header and controls -->
+  <div class="page-header">
+    <h1>Card interactions</h1>
+    <p>
+      Click a card to flip it and reveal a code example.
+      Dismiss cards to see <code>match</code> detect when all are gone.
+      The <code>guard</code> attribute blocks dismissal while cards are loading or resetting.
+    </p>
+    <div class="status-bar">
+      <span class="badge-counter">
+        <span class="count" data-text="$dismissedCount">0</span>
+        <span>/ 6 dismissed</span>
+      </span>
+      <button class="btn-reset" onclick="resetCards()">↺ Reset</button>
+    </div>
+  </div>
+
+  <!-- Card grid -->
+  <div class="card-grid">
+
+    <!-- Card 1: then / and -->
+    <div class="card" data-card-id="1" style="view-transition-name: card-1" onclick="flipCard(1)">
+      <div class="card-inner">
+        <div class="card-face card-front">
+          <div class="card-icon">⟳</div>
+          <h3 class="card-title">then / and</h3>
+          <p class="card-teaser">Sequential and parallel async composition. The runtime awaits everything — you write none of the Promise plumbing.</p>
+          <p class="card-hint">click to flip →</p>
+        </div>
+        <div class="card-face card-back">
+          <pre class="card-code">fade-in  #logo  400ms ease-out and
+slide-up #title 360ms ease-out
+then wait 1800ms
+then emit splash:dismiss</pre>
+          <div class="card-actions">
+            <button class="card-flip-back" onclick="flipCard(1, event)">← flip back</button>
+            <button class="card-dismiss" onclick="dismissCard(1, event)">Got it ✓</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 2: match -->
+    <div class="card" data-card-id="2" style="view-transition-name: card-2" onclick="flipCard(2)">
+      <div class="card-inner">
+        <div class="card-face card-front">
+          <div class="card-icon">⑃</div>
+          <h3 class="card-title">match / /match</h3>
+          <p class="card-teaser">Pattern-matched branching. First arm wins. Wildcard <code>[_]</code> catches everything else.</p>
+          <p class="card-hint">click to flip →</p>
+        </div>
+        <div class="card-face card-back">
+          <pre class="card-code">match $dismissedCount
+  [6] ->
+    emit cards:complete
+  [_] ->
+    broadcast card:dismissed
+/match</pre>
+          <div class="card-actions">
+            <button class="card-flip-back" onclick="flipCard(2, event)">← flip back</button>
+            <button class="card-dismiss" onclick="dismissCard(2, event)">Got it ✓</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 3: guard -->
+    <div class="card" data-card-id="3" style="view-transition-name: card-3" onclick="flipCard(3)">
+      <div class="card-inner">
+        <div class="card-face card-front">
+          <div class="card-icon">🛡</div>
+          <h3 class="card-title">guard</h3>
+          <p class="card-teaser">Declarative precondition on a command. If the guard fails, execution stops silently — no error, no rescue.</p>
+          <p class="card-hint">click to flip →</p>
+        </div>
+        <div class="card-face card-back">
+          <pre class="card-code">&lt;local-command
+  name="card:dismiss"
+  guard="$cardsState == 'live'"
+  do="` ... `"
+&gt;</pre>
+          <div class="card-actions">
+            <button class="card-flip-back" onclick="flipCard(3, event)">← flip back</button>
+            <button class="card-dismiss" onclick="dismissCard(3, event)">Got it ✓</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 4: on-enter / on-exit -->
+    <div class="card" data-card-id="4" style="view-transition-name: card-4" onclick="flipCard(4)">
+      <div class="card-inner">
+        <div class="card-face card-front">
+          <div class="card-icon">👁</div>
+          <h3 class="card-title">on-enter / on-exit</h3>
+          <p class="card-teaser">IntersectionObserver lifecycle. Add a <code>when</code> guard for one-time reveals. Omit it for bidirectional.</p>
+          <p class="card-hint">click to flip →</p>
+        </div>
+        <div class="card-face card-back">
+          <pre class="card-code">&lt;on-enter
+  when="$state == 'hidden'"
+  run="emit section:enter"
+&gt;
+&lt;on-exit
+  run="emit section:exit"
+&gt;</pre>
+          <div class="card-actions">
+            <button class="card-flip-back" onclick="flipCard(4, event)">← flip back</button>
+            <button class="card-dismiss" onclick="dismissCard(4, event)">Got it ✓</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 5: emit / broadcast -->
+    <div class="card" data-card-id="5" style="view-transition-name: card-5" onclick="flipCard(5)">
+      <div class="card-inner">
+        <div class="card-face card-front">
+          <div class="card-icon">📡</div>
+          <h3 class="card-title">emit / broadcast</h3>
+          <p class="card-teaser"><code>emit</code> dispatches within the LES instance. <code>broadcast</code> bubbles through the full DOM.</p>
+          <p class="card-hint">click to flip →</p>
+        </div>
+        <div class="card-face card-back">
+          <pre class="card-code">emit feed:data-ready
+&#x2F;&#x2F; heard inside this LES
+
+broadcast app:booted
+&#x2F;&#x2F; heard by data-on:app:booted
+&#x2F;&#x2F; anywhere in the document</pre>
+          <div class="card-actions">
+            <button class="card-flip-back" onclick="flipCard(5, event)">← flip back</button>
+            <button class="card-dismiss" onclick="dismissCard(5, event)">Got it ✓</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 6: use-module -->
+    <div class="card" data-card-id="6" style="view-transition-name: card-6" onclick="flipCard(6)">
+      <div class="card-inner">
+        <div class="card-face card-front">
+          <div class="card-icon">🧩</div>
+          <h3 class="card-title">use-module</h3>
+          <p class="card-teaser">Extend the animation vocabulary. Built-in primitives via <code>type=</code>, custom via <code>src=</code>.</p>
+          <p class="card-hint">click to flip →</p>
+        </div>
+        <div class="card-face card-back">
+          <pre class="card-code">&lt;use-module type="animation"&gt;
+&lt;use-module src="./spring.js"&gt;
+
+&#x2F;&#x2F; Now spring-in is available:
+spring-in .card  500ms</pre>
+          <div class="card-actions">
+            <button class="card-flip-back" onclick="flipCard(6, event)">← flip back</button>
+            <button class="card-dismiss" onclick="dismissCard(6, event)">Got it ✓</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /.card-grid -->
+
+  <!-- Completion message — hidden until all 6 dismissed -->
+  <div id="complete-msg">
+    <div class="complete-box" id="complete-box">
+      <h2>You got it. ✓</h2>
+      <p>
+        That <code>match $dismissedCount [6] -&gt; emit cards:completed</code>
+        you just triggered? That's LES deciding what to do next based on state —
+        no if/else, no callbacks, just pattern matching in a browser-local script.
+      </p>
+      <button class="btn-start-over" onclick="resetCards()">↺ Start over</button>
+    </div>
+  </div>
+
+  <!-- Primitives used by this demo -->
+  <div class="concepts-used">
+    <span class="concept-pill">local-command</span>
+    <span class="concept-pill">guard</span>
+    <span class="concept-pill">call</span>
+    <span class="concept-pill">match / /match</span>
+    <span class="concept-pill">stagger-enter</span>
+    <span class="concept-pill">slide-out</span>
+    <span class="concept-pill">pulse</span>
+    <span class="concept-pill">emit (past tense facts)</span>
+    <span class="concept-pill">on-load</span>
+  </div>
+
+</local-event-script>
+
+
+<script>
+  function les() { return document.querySelector('local-event-script'); }
+
+  // ── Flip ────────────────────────────────────────────────────────────────
+  // Toggle the CSS .is-flipped class (CSS transition handles the 3D rotation).
+  // LES pulses the card for tactile feedback.
+  function flipCard(id, event) {
+    if (event) event.stopPropagation();
+    var card = document.querySelector('[data-card-id="' + id + '"]');
+    if (!card || card.classList.contains('is-dismissed')) return;
+    card.classList.toggle('is-flipped');
+    les().fire('card:flipped', [String(id)]);
+  }
+
+  // ── Dismiss ─────────────────────────────────────────────────────────────
+  // Mark the card as dismissed, then let LES animate it out.
+  function dismissCard(id, event) {
+    if (event) event.stopPropagation();
+    var card = document.querySelector('[data-card-id="' + id + '"]');
+    if (!card) return;
+    // Unflip immediately (no animation) so the exit slides from front face
+    card.classList.remove('is-flipped');
+    les().fire('card:dismissed', [String(id)]);
+  }
+
+  // ── Reset ───────────────────────────────────────────────────────────────
+  // Restore all dismissed cards to initial state, then let LES stagger them in.
+  function resetCards() {
+    // Hide completion message
+    var completeMsg = document.getElementById('complete-msg');
+    var completeBox = document.getElementById('complete-box');
+    if (completeMsg) completeMsg.classList.remove('visible');
+    if (completeBox) {
+      completeBox.getAnimations().forEach(function(a) { a.cancel(); });
+      completeBox.style.opacity = '0';
+      completeBox.style.transform = 'translateY(20px)';
+    }
+
+    // Reset all cards: un-dismiss, un-flip, reset animation state
+    document.querySelectorAll('.card').forEach(function(card) {
+      card.classList.remove('is-dismissed', 'is-flipped');
+      // Cancel any existing animations and reset to initial (invisible) state
+      card.getAnimations().forEach(function(a) { a.cancel(); });
+      card.style.opacity = '0';
+      card.style.transform = 'translateY(80px)';
+    });
+
+    les().call('cards:restore');
+  }
+
+
+
+  // Hide a dismissed card using View Transitions so remaining cards
+  // animate smoothly to fill the gap. Falls back to instant hide
+  // on browsers without View Transitions support (Firefox < 126).
+  function hideCard(card) {
+    if (!card) return;
+    if (document.startViewTransition) {
+      // Catch "Transition was skipped" — fires when a new View Transition
+      // starts before the previous one completes. The dismiss still happened;
+      // we just suppress the animation error.
+      var t = document.startViewTransition(function() {
+        card.classList.add('is-dismissed');
+      });
+      t.finished.catch(function() {});
+    } else {
+      card.classList.add('is-dismissed');
+    }
+  }
+
+  // broadcast card:dismissed fires for cards 1-5
+  document.addEventListener('card:dismissed', function(e) {  // broadcast from LES
+    var id = e.detail && e.detail.payload && e.detail.payload[0];
+    if (!id) return;
+    // Wait for LES slide-out (320ms) to finish before collapsing the grid cell
+    setTimeout(function() {
+      hideCard(document.querySelector('[data-card-id="' + id + '"]'));
+    }, 340);
+  });
+
+  // cards:revealed fires after all 6 are dismissed.
+  // Hide the last card via View Transition, then call completion-box:enter
+  // only after the transition settles — structural sequencing, no wait hack.
+  document.addEventListener('DOMContentLoaded', function() {
+    var l = les();
+    if (!l) return;
+    l.addEventListener('cards:revealed', function() {
+      setTimeout(function() {
+        var remaining = Array.from(document.querySelectorAll('.card:not(.is-dismissed)'));
+        var msg = document.getElementById('complete-msg');
+        if (msg) msg.classList.add('visible');
+        if (document.startViewTransition) {
+          var t = document.startViewTransition(function() {
+            remaining.forEach(function(card) { card.classList.add('is-dismissed'); });
+          });
+          t.finished
+            .catch(function() {})
+            .finally(function() { les().call('completion-box:enter'); });
+        } else {
+          remaining.forEach(function(card) { card.classList.add('is-dismissed'); });
+          les().call('completion-box:enter');
+        }
+      }, 340);
+    });
+  });
+
+  // cards:restoring broadcast — un-dismiss all cards so stagger-enter has targets
+  document.addEventListener('cards:restoring', function() {
+    var completeMsg = document.getElementById('complete-msg');
+    var completeBox = document.getElementById('complete-box');
+    if (completeMsg) completeMsg.classList.remove('visible');
+    if (completeBox) {
+      completeBox.getAnimations().forEach(function(a) { a.cancel(); });
+      completeBox.style.opacity = '0';
+      completeBox.style.transform = 'translateY(20px)';
+    }
+    document.querySelectorAll('.card').forEach(function(card) {
+      card.classList.remove('is-dismissed', 'is-flipped');
+      card.getAnimations().forEach(function(a) { a.cancel(); });
+      card.style.opacity = '0';
+      card.style.transform = 'translateY(80px)';
+    });
+  });
+</script>
+
+</body>
+</html>

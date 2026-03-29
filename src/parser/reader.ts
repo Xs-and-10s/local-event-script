@@ -193,8 +193,9 @@ export function logConfig(config: LESConfig): void {
   console.log(`[LES]   on-enter:  ${config.onEnter.length}`, config.onEnter.map(e => e.when ?? 'always'))
   console.log(`[LES]   on-exit:   ${config.onExit.length}`)
 
-  if (config.unknown.length > 0) {
-    console.warn(`[LES]   unknown children: ${config.unknown.length}`, config.unknown.map(e => e.tagName.toLowerCase()))
+  const unknownCustom = config.unknown.filter(e => e.tagName.toLowerCase().includes('-'))
+  if (unknownCustom.length > 0) {
+    console.warn(`[LES]   unknown custom children: ${unknownCustom.length}`, unknownCustom.map(e => e.tagName.toLowerCase()))
   }
 
   // Log a sampling of body strings to verify stripBody worked correctly

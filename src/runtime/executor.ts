@@ -693,11 +693,44 @@ function applyPatchSignals(dataLines: string[], ctx: LESContext): void {
  * selectors and substitute from scope.
  */
 function resolveSelector(selector: string, ctx: LESContext): string {
-  // Handle attribute selector with variable: [data-item-id: id]
-  return selector.replace(/\[([^\]]+):\s*(\w+)\]/g, (_match, attr, varName) => {
-    const value = ctx.scope.get(varName) ?? ctx.getSignal(varName)
-    return `[${attr}="${String(value)}"]`
-  })
+  // Resolves LES attribute selectors that contain variable expressions:
+  //   [data-item-id: id]           → [data-item-id="42"]
+  //   [data-card-id: payload[0]]   → [data-card-id="3"]
+  //
+  // A regex is insufficient because the variable expression can itself contain
+  // brackets (e.g. payload[0]), which would confuse a [^\]]+ pattern.
+  // We use a bracket-depth-aware scanner instead.
+  let result = ''
+  let i = 0
+  while (i < selector.length) {
+    if (selector[i] === '[') {
+      // Look for ": " (colon-space) as the attr/varExpr separator
+      const colonIdx = selector.indexOf(': ', i)
+      if (colonIdx === -1) { result += selector[i++]; continue }
+
+      // Scan forward from the varExpr start, tracking bracket depth,
+      // to find the ] that closes this attribute selector (not an inner one)
+      let depth = 0
+      let closeIdx = -1
+      for (let j = colonIdx + 2; j < selector.length; j++) {
+        if (selector[j] === '[') depth++
+        else if (selector[j] === ']') {
+          if (depth === 0) { closeIdx = j; break }
+          depth--
+        }
+      }
+      if (closeIdx === -1) { result += selector[i++]; continue }
+
+      const attr    = selector.slice(i + 1, colonIdx).trim()
+      const varExpr = selector.slice(colonIdx + 2, closeIdx).trim()
+      const value   = evalExpr({ type: 'expr', raw: varExpr }, ctx)
+      result += `[${attr}="${String(value)}"]`
+      i = closeIdx + 1
+    } else {
+      result += selector[i++]
+    }
+  }
+  return result
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

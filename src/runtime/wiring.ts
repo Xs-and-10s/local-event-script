@@ -49,10 +49,17 @@ export function buildContext(
 
   const broadcast = (event: string, payload: unknown[]) => {
     console.log(`[LES] broadcast "${event}"`, payload.length ? payload : '')
-    host.dispatchEvent(new CustomEvent(event, {
+    // Dispatch on document directly, not on the host element.
+    // This prevents the host's own on-event listeners from catching the
+    // broadcast — the host is the origin, not a receiver.
+    // Listeners on document (e.g. document.addEventListener) and Datastar
+    // data-on: bindings on any DOM element still receive it normally.
+    const root = host.getRootNode()
+    const target = root instanceof Document ? root : (root as ShadowRoot).ownerDocument ?? document
+    target.dispatchEvent(new CustomEvent(event, {
       detail: { payload },
-      bubbles: true,
-      composed: true,
+      bubbles: false,   // already at the top — bubbling is meaningless here
+      composed: false,
     }))
   }
 

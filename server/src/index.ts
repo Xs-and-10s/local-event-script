@@ -55,7 +55,7 @@ serve({ fetch: app.fetch, port: PORT }, () => {
   console.log(`  │  /feed      activity feed demo                     │`)
   console.log(`  │  /splash    splash screen demo                      │`)
   console.log(`  │  /scroll    scroll reveal demo                      │`)
-  console.log(`  │  /cards     card interactions (coming soon)        │`)
+  console.log(`  │  /cards     card interactions demo                  │`)
   console.log(`  │  /form      form choreography (coming soon)        │`)
   console.log(`  │                                                    │`)
   console.log(`  │  API: GET /api/feed?filter=all|unread|mentions     │`)

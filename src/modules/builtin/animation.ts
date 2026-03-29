@@ -51,8 +51,11 @@ async function animateAll(
   options: KeyframeAnimationOptions
 ): Promise<void> {
   if (els.length === 0) return
-  // Cancel any in-progress or fill:forwards animations first so we start clean.
-  els.forEach(cancelAnimations)
+  // Note: cancelAnimations is intentionally NOT called here.
+  // It is only called in stagger-enter/stagger-exit where we explicitly
+  // restart an in-progress stagger. Calling cancel on every primitive
+  // would destroy fill:forwards holds from previous animations
+  // (e.g. stagger-enter's hold would be cancelled by a subsequent pulse).
   await Promise.all(
     els.map(el => (el as HTMLElement).animate(keyframes, options).finished
       .catch((err: unknown) => {
