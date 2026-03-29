@@ -242,10 +242,18 @@ export async function execute(node: LESNode, ctx: LESContext): Promise<void> {
     }
 
     // ── action (bare @get etc. not inside a bind) ──────────────────────────
+    // `@get '/api/feed' [filter: $activeFilter]`
+    // Awaits the full SSE stream / JSON response from the server.
+    // Datastar processes the SSE events (patch-elements, patch-signals) as
+    // they arrive. The Promise resolves when the stream closes.
+    // `then` in LES correctly waits for this before proceeding.
     case 'action': {
-      // Bare actions without bind just fire and discard the result
       const n = node
-      await performAction(n.verb, n.url, {}, ctx)
+      const evaledArgs: Record<string, unknown> = {}
+      for (const [key, exprNode] of Object.entries(n.args)) {
+        evaledArgs[key] = evalExpr(exprNode, ctx)
+      }
+      await performAction(n.verb, n.url, evaledArgs, ctx)
       return
     }
 
@@ -471,7 +479,7 @@ async function performAction(
     method,
     headers: {
       'Content-Type': 'application/json',
-      'Accept': 'application/json',
+      'Accept': 'text/event-stream, application/json',
     },
     ...(body ? { body } : {}),
   })
@@ -481,10 +489,194 @@ async function performAction(
   }
 
   const contentType = response.headers.get('content-type') ?? ''
+
+  // ── SSE stream: Datastar server-sent events ───────────────────────────────
+  // When the server returns text/event-stream, consume the SSE stream and
+  // apply datastar-patch-elements / datastar-patch-signals events ourselves.
+  // The Promise resolves when the stream closes — so `then` in LES correctly
+  // waits for all DOM patches before proceeding to the next step.
+  if (contentType.includes('text/event-stream')) {
+    await consumeSSEStream(response, ctx)
+    return undefined
+  }
+
   if (contentType.includes('application/json')) {
     return await response.json()
   }
   return await response.text()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SSE stream consumer
+//
+// Reads a Datastar SSE stream line-by-line and applies the events.
+// We implement a minimal subset of the Datastar SSE spec needed for LES:
+//
+//   datastar-patch-elements  → apply to the DOM using morphdom-lite logic
+//   datastar-patch-signals   → write signal values via ctx.setSignal
+//
+// This runs entirely in the browser — no Datastar internal APIs needed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function consumeSSEStream(
+  response: Response,
+  ctx: LESContext
+): Promise<void> {
+  if (!response.body) return
+
+  const reader  = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer    = ''
+
+  // SSE event accumulator — reset after each double-newline
+  let eventType = ''
+  let dataLines: string[] = []
+
+  const applyEvent = () => {
+    if (!eventType || dataLines.length === 0) return
+
+    if (eventType === 'datastar-patch-elements') {
+      applyPatchElements(dataLines, ctx)
+    } else if (eventType === 'datastar-patch-signals') {
+      applyPatchSignals(dataLines, ctx)
+    }
+
+    // Reset accumulator
+    eventType = ''
+    dataLines = []
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) { applyEvent(); break }
+
+    buffer += decoder.decode(value, { stream: true })
+
+    // Process complete lines from the buffer
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''   // last partial line stays in buffer
+
+    for (const line of lines) {
+      if (line.startsWith('event:')) {
+        eventType = line.slice('event:'.length).trim()
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice('data:'.length).trimStart())
+      } else if (line === '') {
+        // Blank line = end of this SSE event
+        applyEvent()
+      }
+    }
+  }
+}
+
+// ── Apply datastar-patch-elements ─────────────────────────────────────────────
+
+function applyPatchElements(dataLines: string[], ctx: LESContext): void {
+  // Parse the structured data lines into an options object
+  let selector    = ''
+  let mode        = 'outer'
+  const htmlLines: string[] = []
+
+  for (const line of dataLines) {
+    if (line.startsWith('selector '))  { selector = line.slice('selector '.length).trim(); continue }
+    if (line.startsWith('mode '))      { mode     = line.slice('mode '.length).trim();     continue }
+    if (line.startsWith('elements '))  { htmlLines.push(line.slice('elements '.length));   continue }
+    // Lines with no prefix are also element content (Datastar spec allows this)
+    htmlLines.push(line)
+  }
+
+  const html = htmlLines.join('\n').trim()
+
+  const target = selector
+    ? document.querySelector(selector)
+    : null
+
+  console.log(`[LES:sse] patch-elements mode=${mode} selector="${selector}" html.len=${html.length}`)
+
+  if (mode === 'remove') {
+    // Remove all matching elements
+    const toRemove = selector
+      ? Array.from(document.querySelectorAll(selector))
+      : []
+    toRemove.forEach(el => el.remove())
+    return
+  }
+
+  if (mode === 'append' && target) {
+    const frag = parseHTML(html)
+    target.append(frag)
+    return
+  }
+
+  if (mode === 'prepend' && target) {
+    const frag = parseHTML(html)
+    target.prepend(frag)
+    return
+  }
+
+  if (mode === 'inner' && target) {
+    target.innerHTML = html
+    return
+  }
+
+  if (mode === 'outer' && target) {
+    const frag = parseHTML(html)
+    target.replaceWith(frag)
+    return
+  }
+
+  if (mode === 'before' && target) {
+    const frag = parseHTML(html)
+    target.before(frag)
+    return
+  }
+
+  if (mode === 'after' && target) {
+    const frag = parseHTML(html)
+    target.after(frag)
+    return
+  }
+
+  // No selector: try to patch by element IDs
+  if (!selector && html) {
+    const frag = parseHTML(html)
+    for (const el of Array.from(frag.children)) {
+      const id = el.id
+      if (id) {
+        const existing = document.getElementById(id)
+        if (existing) existing.replaceWith(el)
+        else document.body.append(el)
+      }
+    }
+  }
+}
+
+function parseHTML(html: string): DocumentFragment {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  return template.content
+}
+
+// ── Apply datastar-patch-signals ──────────────────────────────────────────────
+
+function applyPatchSignals(dataLines: string[], ctx: LESContext): void {
+  for (const line of dataLines) {
+    if (!line.startsWith('signals ') && !line.startsWith('{')) continue
+
+    const jsonStr = line.startsWith('signals ')
+      ? line.slice('signals '.length)
+      : line
+
+    try {
+      const signals = JSON.parse(jsonStr) as Record<string, unknown>
+      for (const [key, value] of Object.entries(signals)) {
+        ctx.setSignal(key, value)
+        console.log(`[LES:sse] patch-signals $${key} =`, value)
+      }
+    } catch {
+      console.warn('[LES:sse] Failed to parse patch-signals JSON:', jsonStr)
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

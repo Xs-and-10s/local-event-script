@@ -4,12 +4,16 @@
   "description": "Browser-local event choreography runtime. A Datastar plugin + standalone custom element.",
   "type": "module",
   "main": "dist/local-event-script.js",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.dev.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+    "dev:server": "cd server && node --watch --experimental-strip-types src/index.ts",
+    "dev:bundle": "node esbuild.dev.mjs",
+    "dev": "concurrently \"npm run dev:bundle\" \"npm run dev:server\""
   },
   "peerDependencies": {
     "datastar": "*"

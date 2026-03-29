@@ -3,13 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>local-event-script — Phase 0 checkpoint</title>
+  <title>local-event-script — activity feed demo</title>
 
-  <!--
-    importmap: tells the browser where "datastar" lives.
-    The LES bundle itself does NOT include Datastar — it references it
-    by the bare specifier "datastar" which resolves via this map.
-  -->
   <script type="importmap">
     {
       "imports": {
@@ -18,14 +13,10 @@
     }
   </script>
 
-  <!--
-    LES plugin — loaded after the importmap so "datastar" resolves correctly.
-    Phase 0: all elements register, Datastar bridge connects.
-    Phase 8: <use-module> loads animation primitives.
-  -->
   <script type="module" src="/dist/local-event-script.js"></script>
 
   <style>
+    *, *::before, *::after { box-sizing: border-box; }
     body {
       font-family: system-ui, sans-serif;
       max-width: 860px;
@@ -33,48 +24,26 @@
       padding: 0 1.5rem;
       color: #222;
     }
-
     h1 { font-size: 1.4rem; font-weight: 500; margin-bottom: 0.25rem; }
-    .subtitle { color: #666; font-size: 0.9rem; margin-bottom: 2rem; }
+    .subtitle { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
 
-    .checkpoint {
-      background: #f0f4ff;
-      border-left: 3px solid #5563de;
+    .boundary-note {
+      background: #f0fdf4;
+      border-left: 3px solid #22c55e;
       padding: 0.75rem 1rem;
       border-radius: 0 6px 6px 0;
-      margin-bottom: 2rem;
+      margin-bottom: 1.5rem;
       font-size: 0.875rem;
     }
-    .checkpoint strong { color: #3a47c9; }
-
-    /* Simulate feed items for later phases */
-    .feed-item {
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      margin-bottom: 0.5rem;
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    .feed-item .badge {
-      background: #e0f2fe;
-      color: #0369a1;
-      border-radius: 4px;
-      padding: 0.2rem 0.5rem;
-      font-size: 0.75rem;
-      white-space: nowrap;
-    }
-    .feed-item.is-new    { border-color: #6ee7b7; }
-    .feed-item.is-updated { border-color: #fbbf24; }
-    .feed-item.is-stale  { opacity: 0.4; }
+    .boundary-note strong { color: #15803d; }
+    .boundary-note code { background: #dcfce7; padding: 0 3px; border-radius: 3px; }
 
     .feed-controls {
       display: flex;
-      gap: 0.75rem;
+      gap: 0.6rem;
       margin-bottom: 1rem;
       flex-wrap: wrap;
+      align-items: center;
     }
     .feed-controls button {
       padding: 0.4rem 0.9rem;
@@ -85,7 +54,47 @@
       font-size: 0.875rem;
     }
     .feed-controls button:hover { background: #f9fafb; }
+    .feed-controls .sep { color: #d1d5db; }
 
+    .feed-item {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      opacity: 0;
+      transform: translateX(60px);
+    }
+    .feed-item .badge {
+      background: #e0f2fe;
+      color: #0369a1;
+      border-radius: 4px;
+      padding: 0.2rem 0.5rem;
+      font-size: 0.75rem;
+      white-space: nowrap;
+    }
+    .feed-item.is-new     { border-color: #6ee7b7; }
+    .feed-item.is-updated { border-color: #fbbf24; }
+
+    #feed-state {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin-left: auto;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      background: #f3f4f6;
+      font-variant-numeric: tabular-nums;
+      transition: color 0.2s;
+    }
+    #feed-state[data-state="loading"]   { color: #d97706; background: #fef3c7; }
+    #feed-state[data-state="live"]      { color: #15803d; background: #dcfce7; }
+    #feed-state[data-state="filtering"] { color: #4338ca; background: #e0e7ff; }
+    #feed-state[data-state="error"]     { color: #b91c1c; background: #fee2e2; }
+
+    hr { margin: 2rem 0; border: none; border-top: 1px solid #e5e7eb; }
     #debug-log {
       background: #111;
       color: #c8ffa7;
@@ -93,7 +102,7 @@
       font-size: 0.78rem;
       padding: 1rem;
       border-radius: 6px;
-      height: 220px;
+      height: 200px;
       overflow-y: auto;
       white-space: pre-wrap;
       word-break: break-all;
@@ -102,109 +111,69 @@
 </head>
 <body>
 
-<!-- Plain <script> runs before any type="module" scripts.
-     This guarantees console.log is intercepted before LES elements
-     fire their connectedCallback logs. -->
 <script>
   (function() {
-    var buffer = [];
-    var origLog = console.log.bind(console);
-
+    var buf = [];
+    var orig = console.log.bind(console);
     function flush(line) {
       var el = document.getElementById('debug-log');
-      if (el) {
-        // drain any buffered lines first
-        if (buffer.length) {
-          el.textContent += buffer.join('\n') + '\n';
-          buffer = [];
-        }
-        el.textContent += line + '\n';
-        el.scrollTop = el.scrollHeight;
-      } else {
-        buffer.push(line);
-      }
+      if (el) { if (buf.length) { el.textContent += buf.join('\n') + '\n'; buf = []; } el.textContent += line + '\n'; el.scrollTop = el.scrollHeight; }
+      else buf.push(line);
     }
-
     console.log = function() {
-      origLog.apply(console, arguments);
-      var args = Array.prototype.slice.call(arguments);
-      // Only intercept [LES...] and [demo] messages
-      var first = args[0];
-      if (typeof first === 'string' && (first.startsWith('[LES') || first.startsWith('[demo'))) {
-        var line = args.map(function(a) {
-          return typeof a === 'object' ? JSON.stringify(a) : String(a);
-        }).join(' ');
-        flush(line);
+      orig.apply(console, arguments);
+      var a = Array.prototype.slice.call(arguments);
+      var f = a[0];
+      if (typeof f === 'string' && (f.startsWith('[LES') || f.startsWith('[demo') || f.startsWith('[feed') || f.startsWith('[mock'))) {
+        flush(a.map(function(x) { return typeof x === 'object' ? JSON.stringify(x) : String(x); }).join(' '));
       }
     };
-
-    // Flush buffer once DOM is ready (handles logs that fired before #debug-log existed)
     document.addEventListener('DOMContentLoaded', function() {
       var el = document.getElementById('debug-log');
-      if (el && buffer.length) {
-        el.textContent = buffer.join('\n') + '\n';
-        el.scrollTop = el.scrollHeight;
-        buffer = [];
-      }
+      if (el && buf.length) { el.textContent = buf.join('\n') + '\n'; buf = []; }
     });
   })();
 </script>
 
-<h1>local-event-script</h1>
-<p class="subtitle">Browser-local event choreography runtime · Phase 0 checkpoint</p>
+<h1>local-event-script + Datastar</h1>
+<p class="subtitle">Activity feed demo &middot; LES owns animation &middot; Datastar owns DOM</p>
 
-<div class="checkpoint">
-  <strong>Phase 5–7 checkpoint</strong> — debug log should show:
-  <ul>
-    <li><code>[LES] IntersectionObserver attached  activity-feed</code></li>
-    <li><code>[LES] wired 2 signal watchers (local fallback)</code></li>
-    <li><code>[LES] emit "feed:init"</code> → <code>$feedState = loading</code></li>
-    <li><code>[LES] ready: activity-feed</code></li>
-  </ul>
-  <strong>Animation tests</strong> — use the buttons below:
-  <ul>
-    <li><em>Enter items</em> — staggers .feed-item in from right</li>
-    <li><em>Exit all</em> — staggers .feed-item out in reverse</li>
-    <li><em>Pulse updated</em> — pulses .is-updated items</li>
-    <li><em>Dismiss item 1</em> — slides single item out</li>
-  </ul>
-  <em>Scroll the page so the feed goes off-screen, then back — on-enter/on-exit fires.</em>
+<div class="boundary-note">
+  <strong>Boundary:</strong>
+  Datastar SSE (<code>GET /api/feed</code>) removes old items and appends new ones.
+  LES animates them as they arrive/leave.
+  Items start at <code>opacity:0; transform:translateX(60px)</code> via CSS &mdash;
+  LES <code>stagger-enter</code> brings them to life.
 </div>
-
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     THE CANONICAL EXAMPLE
-     This is the activity-feed LES definition. In Phase 0 it does nothing —
-     all children register and log, nothing executes yet.
-════════════════════════════════════════════════════════════════════════════ -->
 
 <local-event-script
   id="activity-feed"
   data-signals:feedState="'idle'"
   data-signals:feedItems="[]"
+  data-signals:feedItemCount="0"
   data-signals:activeFilter="'all'"
 >
-
-  <!-- Vocabulary imports -->
   <use-module type="animation"></use-module>
-  <!-- userland module examples — stubs in scroll-effects.js / spring-physics.js -->
   <use-module src="./scroll-effects.js"></use-module>
   <use-module src="./spring-physics.js"></use-module>
 
-  <!-- Lifecycle -->
+  <!-- LIFECYCLE -->
   <on-load  run="emit feed:init"></on-load>
   <on-enter when="$feedState == 'paused'" run="emit feed:resumed"></on-enter>
   <on-exit  run="emit feed:paused"></on-exit>
 
-  <!-- Event handlers -->
+  <!-- EVENT HANDLERS -->
   <on-event name="feed:init" handle="`
     set $feedState to 'loading'
-    then call feed:fetch [filter: $activeFilter]
+    then @get '/api/feed' [filter: $activeFilter]
+    then emit feed:data-ready
   `"></on-event>
 
   <on-event name="feed:paused"  handle="set $feedState to 'paused'"></on-event>
   <on-event name="feed:resumed" handle="`
     set $feedState to 'loading'
-    then call feed:fetch [filter: $activeFilter]
+    then @get '/api/feed' [filter: $activeFilter]
+    then emit feed:data-ready
   `"></on-event>
 
   <on-signal
@@ -213,17 +182,20 @@
     handle="emit feed:server-pushed [$feedItems]"
   ></on-signal>
 
-  <on-signal
-    name="$activeFilter"
-    when="$feedState == 'live'"
-    handle="emit feed:filter-changed [$activeFilter]"
-  ></on-signal>
-
+  <!--
+    Filter flow:
+    1. 'filtering' state blocks on-signal re-trigger
+    2. Extract new filter from payload[0]
+    3. LES exits current items (animation)
+    4. Datastar @get → server patches DOM (removes old, appends new)
+    5. LES enters new items (animation)
+  -->
   <on-event name="feed:filter-changed" handle="`
     set $feedState to 'filtering'
     then set $activeFilter to payload[0]
     then call feed:exit-all
-    then call feed:fetch [filter: $activeFilter]
+    then @get '/api/feed' [filter: $activeFilter]
+    then emit feed:data-ready
   `"></on-event>
 
   <on-event name="feed:data-ready" handle="`
@@ -248,39 +220,13 @@
     then broadcast feed:error [$error]
   `"></on-event>
 
-  <!-- Commands -->
-  <local-command
-    name="feed:fetch"
-    args="[filter:str]"
-    guard="$feedState != 'loading'"
-    do="`
-      set $feedState to 'loading'
-      try
-        response <- @get '/api/feed' [filter: filter]
-        then match response
-          [it   ok   ] ->
-            set $feedItems to it.items
-            then emit feed:data-ready
-          [nil  error] ->
-            emit feed:error [$error]
-        /match
-      rescue
-        emit feed:error ['network-failure']
-      afterwards
-        match $feedState
-          ['error'] -> set $feedState to 'error'
-          [_]       -> set $feedState to 'live'
-        /match
-      /try
-    `"
-  ></local-command>
-
+  <!-- COMMANDS — animation only, no data fetching -->
   <local-command name="feed:enter-items" do="`
-    stagger-enter .feed-item        320ms cubic-bezier(0.22,1,0.36,1) [gap: 55ms  from: right]
+    stagger-enter .feed-item  320ms cubic-bezier(0.22,1,0.36,1) [gap: 55ms  from: right]
   `"></local-command>
 
   <local-command name="feed:enter-new-items" do="`
-    stagger-enter .feed-item.is-new 280ms cubic-bezier(0.22,1,0.36,1) [gap: 45ms  from: right]
+    stagger-enter .feed-item.is-new  280ms cubic-bezier(0.22,1,0.36,1) [gap: 45ms  from: right]
   `"></local-command>
 
   <local-command name="feed:update-items" do="`
@@ -288,11 +234,11 @@
   `"></local-command>
 
   <local-command name="feed:exit-all" do="`
-    stagger-exit .feed-item          200ms ease-in [gap: 30ms  direction: reverse]
+    stagger-exit .feed-item  200ms ease-in [gap: 30ms  direction: reverse]
   `"></local-command>
 
   <local-command name="feed:exit-stale-items" do="`
-    stagger-exit .feed-item.is-stale 180ms ease-in [gap: 25ms]
+    stagger-exit .feed-item.is-stale  180ms ease-in [gap: 25ms]
   `"></local-command>
 
   <local-command name="feed:exit-item" args="[id:str]" do="`
@@ -302,115 +248,46 @@
 </local-event-script>
 
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     VISIBLE DEMO CONTENT (for later phases — inert in Phase 0)
-════════════════════════════════════════════════════════════════════════════ -->
-
+<!-- UI outside LES — state indicator driven by Datastar -->
 <div class="feed-controls">
-  <button onclick="simulateFilter('all')">Filter: all</button>
-  <button onclick="simulateFilter('unread')">Filter: unread</button>
-  <button onclick="simulateFilter('mentions')">Filter: mentions</button>
-  <button onclick="simulateServerPush()">Simulate server push</button>
-  <button onclick="simulateDismiss()">Dismiss item 1</button>
-  <button onclick="simulateBoot()">Boot (app:boot)</button>
-  <button onclick="testEnterItems()" style="background:#e0f2fe">↓ Enter items</button>
-  <button onclick="testExitAll()"   style="background:#fce7f3">↑ Exit all</button>
-  <button onclick="testPulse()"     style="background:#fef3c7">✦ Pulse updated</button>
+  <button onclick="les().fire('feed:filter-changed', ['all'])">Filter: all</button>
+  <button onclick="les().fire('feed:filter-changed', ['unread'])">Filter: unread</button>
+  <button onclick="les().fire('feed:filter-changed', ['mentions'])">Filter: mentions</button>
+  <span class="sep">|</span>
+  <button onclick="les().call('feed:enter-items')"  style="background:#e0f2fe">&#8595; Enter items</button>
+  <button onclick="les().call('feed:exit-all')"     style="background:#fce7f3">&#8593; Exit all</button>
+  <button onclick="les().call('feed:update-items')" style="background:#fef3c7">&#10022; Pulse updated</button>
+  <span class="sep">|</span>
+  <button onclick="fireItemDismissed('1')">&#215; Dismiss #1</button>
+  <span id="feed-state" data-attr:data-state="$feedState" data-text="$feedState"></span>
 </div>
 
-<div id="feed-container">
-  <div class="feed-item is-new"     data-item-id="1"><span class="badge">new</span>     Server deployed to production</div>
-  <div class="feed-item is-updated" data-item-id="2"><span class="badge">updated</span> PR #42 merged by @alice</div>
-  <div class="feed-item"            data-item-id="3">                                   Build pipeline passed (12 tests)</div>
-  <div class="feed-item is-stale"   data-item-id="4"><span class="badge">stale</span>   Scheduled job completed</div>
-</div>
+<!--
+  Items are rendered INTO here by Datastar SSE from GET /api/feed.
+  This div starts empty — the server populates it on page load.
+-->
+<div id="feed-container"></div>
 
-<hr style="margin: 2rem 0; border: none; border-top: 1px solid #e5e7eb;">
-<p style="font-size: 0.8rem; color: #999;">Debug log (console.log intercepted)</p>
+<hr>
+<p style="font-size:0.8rem;color:#999">Debug log</p>
 <div id="debug-log"></div>
 
-
 <script>
-  // ─── Mock /api/feed endpoint ───────────────────────────────────────────────
-  // Intercepts fetch calls to /api/feed so the demo works without a backend.
-  // Returns filtered feed items as JSON.
-  (function() {
-    const ALL_ITEMS = [
-      { id: '1', text: 'Server deployed to production', tags: ['all'], cls: 'is-new' },
-      { id: '2', text: 'PR #42 merged by @alice',       tags: ['all', 'mentions'], cls: 'is-updated' },
-      { id: '3', text: 'Build pipeline passed (12 tests)', tags: ['all', 'unread'], cls: '' },
-      { id: '4', text: 'Scheduled job completed',       tags: ['all'], cls: 'is-stale' },
-    ];
+  function les() { return document.querySelector('local-event-script'); }
 
-    const origFetch = window.fetch.bind(window);
-    window.fetch = function(url, opts) {
-      const urlStr = typeof url === 'string' ? url : url.toString();
-      if (urlStr.includes('/api/feed')) {
-        const params = new URL(urlStr, location.href).searchParams;
-        const filter = params.get('filter') || 'all';
-        const items = ALL_ITEMS.filter(item => item.tags.includes(filter));
-        console.log('[mock] GET /api/feed?filter=' + filter + ' → ' + items.length + ' items');
-        return Promise.resolve(new Response(JSON.stringify({ items }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' }
-        }));
-      }
-      return origFetch(url, opts);
-    };
-  })();
-</script>
-
-<script>
-  // Simulation helpers — plain global functions, visible to button onclick handlers
-  function les() { return document.querySelector('local-event-script') }
-
-  // Listen for feed:ready broadcast to update visible items based on filter
-  document.addEventListener('feed:ready', function() {
-    const filter = les().signal('activeFilter') || 'all';
-    const filterMap = {
-      'all':      ['1','2','3','4'],
-      'unread':   ['3'],
-      'mentions': ['2'],
-    };
-    const visibleIds = filterMap[filter] || ['1','2','3','4'];
-    document.querySelectorAll('.feed-item').forEach(function(el) {
-      const id = el.getAttribute('data-item-id');
-      el.style.display = visibleIds.includes(id) ? '' : 'none';
-    });
-    console.log('[demo] feed:ready — showing ids:', visibleIds, 'for filter:', filter);
-  });
-
-  window.simulateFilter = function(filter) {
-    console.log('[demo] Firing feed:filter-changed: ' + filter);
-    les().fire('feed:filter-changed', [filter]);
-  };
-  window.simulateServerPush = function() {
-    console.log('[demo] Firing feed:server-pushed');
-    les().fire('feed:server-pushed', []);
-  };
-  window.simulateDismiss = function() {
-    console.log('[demo] Firing item:dismissed id=1');
-    // detail.id is read by: call feed:exit-item [id: event.detail.id]
+  function fireItemDismissed(id) {
+    console.log('[demo] item:dismissed id=' + id);
     les().dispatchEvent(new CustomEvent('item:dismissed', {
-      detail: { id: '1', payload: [] }, bubbles: false
+      detail: { id: id, payload: [] }, bubbles: false
     }));
-  };
-  window.simulateBoot = function() {
-    console.log('[demo] Firing app:boot');
-    les().fire('app:boot');
-  };
-  window.testEnterItems = function() {
-    console.log('[demo] Calling feed:enter-items');
-    les().call('feed:enter-items');
-  };
-  window.testExitAll = function() {
-    console.log('[demo] Calling feed:exit-all');
-    les().call('feed:exit-all');
-  };
-  window.testPulse = function() {
-    console.log('[demo] Calling feed:update-items');
-    les().call('feed:update-items');
-  };
+  }
+
+  document.addEventListener('feed:ready', function() {
+    console.log('[demo] feed:ready — items live in DOM');
+  });
+  document.addEventListener('item:dismissed', function(e) {
+    console.log('[demo] item:dismissed broadcast:', JSON.stringify(e.detail));
+  });
 </script>
 
 </body>

@@ -181,6 +181,9 @@ export class LESParser {
     if (first === 'call')      return this.parseCall(text, token)
     if (first === 'wait')      return this.parseWait(text, token)
 
+    // ── Bare Datastar action: `@get '/url' [args]` (fire-and-await, no bind) ──
+    if (first.startsWith('@'))  return this.parseAction(text, token)
+
     // ── Async bind: `name <- @verb 'url' [args]` ─────────────────────────────
     if (text.includes(' <- ')) return this.parseBind(text, token)
 
@@ -368,6 +371,21 @@ export class LESParser {
       args: parseArgList(m[4] ?? ''),
     }
     return { type: 'bind', name: m[1]!, action }
+  }
+
+  private parseAction(text: string, token: Token): ActionNode {
+    // `@get '/url' [args]` or `@post '/url' [args]`
+    const m = text.match(/^@(\w+)\s+'([^']+)'\s*(?:\[(.+)\])?$/)
+    if (!m) {
+      console.warn(`[LES:parser] Malformed action: ${JSON.stringify(text)}`, token)
+      return { type: 'action', verb: 'get', url: '', args: {} }
+    }
+    return {
+      type: 'action',
+      verb: m[1]!.toLowerCase(),
+      url: m[2]!,
+      args: parseArgList(m[3] ?? ''),
+    }
   }
 
   private parseAnimation(text: string, token: Token): AnimationNode {
