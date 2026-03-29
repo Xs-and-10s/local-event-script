@@ -187,8 +187,17 @@ export class LESParser {
     // ── Async bind: `name <- @verb 'url' [args]` ─────────────────────────────
     if (text.includes(' <- ')) return this.parseBind(text, token)
 
-    // ── Animation primitive ──────────────────────────────────────────────────
+    // ── Animation primitive (built-in) ──────────────────────────────────────
     if (ANIMATION_PRIMITIVES.has(first)) return this.parseAnimation(text, token)
+
+    // ── Animation primitive (userland module) ────────────────────────────────
+    // Any hyphenated word followed by a CSS selector + duration looks like an
+    // animation call. This handles userland primitives like `scroll-reveal`,
+    // `spring-in`, etc. registered via <use-module src="...">.
+    // Pattern: word-with-hyphen  .selector-or-#id  Nms  easing  [opts?]
+    if (first.includes('-') && looksLikeAnimationCall(text)) {
+      return this.parseAnimation(text, token)
+    }
 
     // ── Unknown: store as raw expression (escape hatch / future keywords) ────
     console.warn(`[LES:parser] Unknown statement: ${JSON.stringify(text)}`, token)
@@ -572,6 +581,23 @@ function expr(raw: string): ExprNode {
 
 function firstWord(text: string): string {
   return text.split(/\s+/)[0] ?? ''
+}
+
+/**
+ * Returns true if a statement looks like an animation call:
+ *   <word-with-hyphen>  <selector|duration>  ...
+ *
+ * This allows userland module primitives (scroll-reveal, spring-in, etc.)
+ * to be parsed as AnimationNode without being listed in ANIMATION_PRIMITIVES.
+ * The executor then dispatches them through the ModuleRegistry.
+ */
+function looksLikeAnimationCall(text: string): boolean {
+  const parts = text.trim().split(/\s+/)
+  if (parts.length < 2) return false
+  const second = parts[1] ?? ''
+  // Second token is a CSS selector (.class, #id, [attr], tagname) or a duration (Nms)
+  return /^[.#\[]/.test(second) ||  // CSS selector
+         /^\d+ms$/.test(second)      // bare duration (unusual but valid)
 }
 
 function toSequenceOrSingle(steps: LESNode[]): LESNode {

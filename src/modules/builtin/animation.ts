@@ -54,7 +54,14 @@ async function animateAll(
   // Cancel any in-progress or fill:forwards animations first so we start clean.
   els.forEach(cancelAnimations)
   await Promise.all(
-    els.map(el => (el as HTMLElement).animate(keyframes, options).finished)
+    els.map(el => (el as HTMLElement).animate(keyframes, options).finished
+      .catch((err: unknown) => {
+        // AbortError is expected when cancelAnimations() interrupts a running
+        // animation. Swallow it — the new animation has already started.
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        throw err
+      })
+    )
   )
 }
 
@@ -65,7 +72,7 @@ async function animateAll(
 type Direction = 'left' | 'right' | 'up' | 'down'
 
 function slideKeyframes(dir: Direction, entering: boolean): Keyframe[] {
-  const distance = '60px'
+  const distance = '80px'
   const translations: Record<Direction, string> = {
     left:  `translateX(-${distance})`,
     right: `translateX(${distance})`,
@@ -166,7 +173,10 @@ const staggerEnter: LESPrimitive = async (selector, duration, easing, opts, host
       (el as HTMLElement).animate(
         slideKeyframes(from, true),
         { duration, easing, fill: 'forwards', delay: i * gap }
-      ).finished
+      ).finished.catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        throw err
+      })
     )
   )
 }
@@ -199,7 +209,10 @@ const staggerExit: LESPrimitive = async (selector, duration, easing, opts, host)
       (el as HTMLElement).animate(
         slideKeyframes(to, false),
         { duration, easing, fill: 'forwards', delay: i * gap }
-      ).finished
+      ).finished.catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        throw err
+      })
     )
   )
 }

@@ -157,13 +157,16 @@ export function readConfig(host: Element): LESConfig {
     if (handler) {
       handler(child, config)
     } else {
-      // HTML comments don't appear in .children, only in .childNodes.
-      // So everything here is a real element — warn and collect.
       config.unknown.push(child)
-      console.warn(
-        `[LES] Unknown child element <${tag}> inside <local-event-script id="${config.id}"> — ignored.`,
-        child
-      )
+      // Only warn for hyphenated custom element names — those are likely
+      // mis-typed LES keywords. Plain HTML elements (div, p, section, etc.)
+      // are valid content children and pass through silently.
+      if (tag.includes('-')) {
+        console.warn(
+          `[LES] Unknown child element <${tag}> inside <local-event-script id="${config.id}"> — ignored. Did you mean a LES element?`,
+          child
+        )
+      }
     }
   }
 

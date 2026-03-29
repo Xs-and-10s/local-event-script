@@ -18,7 +18,7 @@ const scrollEffects = {
   primitives: {
     'scroll-reveal': async (selector, duration, easing, options, host) => {
       const root = host.getRootNode()
-      const scope = root instanceof Document ? root : document
+      const scope = (root instanceof Document) ? root : (root.ownerDocument ?? document)
       const els = Array.from(scope.querySelectorAll(selector))
       console.log('[scroll-effects] scroll-reveal (stub)', selector, els.length, 'elements')
       // Real implementation: IntersectionObserver + Web Animations API

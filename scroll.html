@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LES — Scroll Reveal Demo</title>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "datastar": "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js"
+      }
+    }
+  </script>
+  <script type="module" src="/dist/local-event-script.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      --bg:      #0f1117;
+      --surface: #1a1d27;
+      --border:  #2a2d3a;
+      --text:    #e2e4ec;
+      --muted:   #6b7280;
+      --accent:  #7c6cf7;
+      --green:   #4ade80;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      line-height: 1.6;
+    }
+
+    /* local-event-script wraps each section — needs to be a block
+       so its height equals its content and IO observes correctly */
+    local-event-script {
+      display: block;
+    }
+
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.9rem 2rem;
+      background: rgba(15,17,23,0.85);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+    }
+    nav a       { color: var(--muted); text-decoration: none; font-size: 0.8rem; }
+    nav a:hover { color: var(--text); }
+    nav .brand  { font-size: 0.8rem; font-weight: 600; color: var(--accent);
+                  letter-spacing: 0.05em; font-variant: small-caps; }
+
+    .section {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 7rem 2rem 5rem;
+    }
+
+    .section-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 0.75rem;
+    }
+
+    .section-divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    /* Elements start invisible — LES animates them into view */
+    .will-animate {
+      opacity: 0;
+      transform: translateY(80px);
+    }
+
+    /* ── Section 1: Hero ── */
+    .hero-eyebrow {
+      font-size: 0.8rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    .hero-title {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin: 0 0 1.25rem;
+    }
+
+    .hero-title em { font-style: normal; color: var(--accent); }
+
+    .hero-sub {
+      font-size: 1.05rem;
+      color: var(--muted);
+      max-width: 480px;
+      margin: 0 0 2rem;
+    }
+
+    .badge-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .badge {
+      font-size: 0.7rem;
+      font-weight: 500;
+      padding: 0.25rem 0.6rem;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: monospace;
+    }
+
+    /* ── Section 2: Concept cards ── */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+
+    .concept-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+    }
+
+    .concept-card .icon { font-size: 1.4rem; margin-bottom: 0.6rem; }
+    .concept-card h3 {
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin: 0 0 0.4rem;
+      font-family: monospace;
+      color: var(--accent);
+    }
+    .concept-card p { font-size: 0.78rem; color: var(--muted); margin: 0; line-height: 1.45; }
+
+    /* ── Section 3: Steps ── */
+    .steps { display: flex; flex-direction: column; gap: 1.5rem; margin-top: 2rem; }
+    .step  { display: flex; gap: 1.25rem; align-items: flex-start; }
+    .step-num {
+      flex-shrink: 0;
+      width: 2rem; height: 2rem;
+      border-radius: 50%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; font-weight: 600; color: var(--accent);
+      margin-top: 0.1rem;
+    }
+    .step-body h3 { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.3rem; }
+    .step-body p  { font-size: 0.85rem; color: var(--muted); margin: 0; }
+    .step-body code {
+      font-family: monospace; font-size: 0.82rem;
+      background: var(--surface); padding: 0.1rem 0.35rem;
+      border-radius: 3px; color: var(--green);
+    }
+
+    /* ── Section 4: Counter (bidirectional) ── */
+    .counter-intro { font-size: 0.9rem; color: var(--muted); margin-top: 0.5rem; margin-bottom: 2rem; }
+    .counter-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+    .counter-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem 1rem;
+      text-align: center;
+    }
+    .counter-item .number {
+      font-size: 2.2rem; font-weight: 700;
+      letter-spacing: -0.04em; line-height: 1;
+      color: var(--green); display: block; margin-bottom: 0.4rem;
+    }
+    .counter-item .label {
+      font-size: 0.75rem; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+
+    .bidirectional-note {
+      margin-top: 1.5rem;
+      padding: 0.75rem 1rem 0.75rem 2.25rem;
+      background: rgba(124,108,247,0.08);
+      border: 1px solid rgba(124,108,247,0.2);
+      border-radius: 8px;
+      font-size: 0.8rem;
+      color: #a5b4fc;
+      line-height: 1.6;
+      position: relative;
+    }
+    .bidirectional-note::before {
+      content: "↕";
+      position: absolute;
+      left: 0.75rem;
+      top: 0.75rem;
+    }
+
+    /* ── Section 5: Userland module ── */
+    .quote-block {
+      border-left: 3px solid var(--accent);
+      padding-left: 1.5rem;
+      margin-top: 2rem;
+    }
+    .quote-block blockquote {
+      font-size: 1.15rem; font-style: italic;
+      color: var(--text); margin: 0 0 0.75rem; line-height: 1.6;
+    }
+    .quote-block cite { font-size: 0.8rem; color: var(--muted); font-style: normal; }
+    .module-tag {
+      display: inline-block; margin-top: 1.5rem;
+      font-size: 0.7rem; font-family: monospace; color: var(--green);
+      background: rgba(74,222,128,0.08);
+      border: 1px solid rgba(74,222,128,0.2);
+      border-radius: 4px; padding: 0.2rem 0.5rem;
+    }
+
+    /* ── Section 6: CTA ── */
+    .cta-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 3rem 2rem;
+      text-align: center;
+      margin-top: 2rem;
+    }
+    .cta-box h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 0.75rem; }
+    .cta-box p  { color: var(--muted); font-size: 0.9rem; margin: 0 0 1.5rem; }
+    .cta-links  { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+    .btn { padding: 0.6rem 1.25rem; border-radius: 8px; font-size: 0.875rem; font-weight: 500; text-decoration: none; cursor: pointer; border: none; transition: opacity 0.15s; }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost   { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+
+    .bottom-space { height: 8rem; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="/">← demos</a>
+  <span class="brand">LES</span>
+  <a href="https://github.com" target="_blank">GitHub</a>
+</nav>
+
+
+<!-- ══════════════════════════════════════════════════════
+  SECTION 1 — Hero intro
+  <local-event-script> wraps the content div so the
+  IntersectionObserver has real height to observe.
+  when guard = one-time reveal only.
+══════════════════════════════════════════════════════ -->
+<local-event-script id="section-intro" data-signals:introState="'hidden'">
+  <use-module type="animation"></use-module>
+  <on-enter when="$introState == 'hidden'" run="emit intro:enter"></on-enter>
+  <on-event name="intro:enter" handle="`
+    set $introState to 'visible'
+    then stagger-enter .intro-item  600ms cubic-bezier(0.22,1,0.36,1) [gap: 120ms  from: down]
+  `"></on-event>
+
+  <div class="section">
+    <p class="section-label will-animate intro-item">Scroll reveal demo</p>
+    <p class="hero-eyebrow will-animate intro-item">on-enter · on-exit · IntersectionObserver</p>
+    <h1 class="hero-title will-animate intro-item">
+      Scroll-driven<br><em>choreography</em><br>without the hacks.
+    </h1>
+    <p class="hero-sub will-animate intro-item">
+      Each section is a self-contained <code>&lt;local-event-script&gt;</code>
+      that wraps its content — giving the IntersectionObserver real height
+      to observe. Scroll down to see different animation strategies.
+    </p>
+    <div class="badge-row will-animate intro-item">
+      <span class="badge">on-enter</span>
+      <span class="badge">on-exit</span>
+      <span class="badge">when guard</span>
+      <span class="badge">stagger-enter from: down</span>
+      <span class="badge">use-module src=</span>
+    </div>
+  </div>
+</local-event-script>
+
+<hr class="section-divider">
+
+
+<!-- ══════════════════════════════════════════════════════
+  SECTION 2 — Concept cards
+  One-time stagger from right.
+══════════════════════════════════════════════════════ -->
+<local-event-script id="section-concepts" data-signals:conceptsState="'hidden'">
+  <use-module type="animation"></use-module>
+  <on-enter when="$conceptsState == 'hidden'" run="emit concepts:enter"></on-enter>
+  <on-event name="concepts:enter" handle="`
+    set $conceptsState to 'visible'
+    then stagger-enter .concept-item  520ms cubic-bezier(0.22,1,0.36,1) [gap: 110ms  from: right]
+  `"></on-event>
+
+  <div class="section">
+    <p class="section-label will-animate concept-item">Language primitives</p>
+    <h2 style="font-size:1.5rem;font-weight:600;letter-spacing:-0.02em;margin:0" class="will-animate concept-item">
+      The full vocabulary
+    </h2>
+    <div class="card-grid">
+      <div class="concept-card will-animate concept-item">
+        <div class="icon">⟳</div>
+        <h3>then / and</h3>
+        <p>Sequential and parallel async. Async-transparent — no await needed.</p>
+      </div>
+      <div class="concept-card will-animate concept-item">
+        <div class="icon">👁</div>
+        <h3>on-enter</h3>
+        <p>Fires when the host element enters the viewport via IntersectionObserver.</p>
+      </div>
+      <div class="concept-card will-animate concept-item">
+        <div class="icon">👋</div>
+        <h3>on-exit</h3>
+        <p>Fires when the host exits the viewport. Enables bidirectional choreography.</p>
+      </div>
+      <div class="concept-card will-animate concept-item">
+        <div class="icon">🛡</div>
+        <h3>when guard</h3>
+        <p>Conditional gate. <code>when="$state == 'hidden'"</code> = reveal once only.</p>
+      </div>
+    </div>
+  </div>
+</local-event-script>
+
+<hr class="section-divider">
+
+
+<!-- ══════════════════════════════════════════════════════
+  SECTION 3 — How it works (steps)
+  One-time stagger from left.
+══════════════════════════════════════════════════════ -->
+<local-event-script id="section-steps" data-signals:stepsState="'hidden'">
+  <use-module type="animation"></use-module>
+  <on-enter when="$stepsState == 'hidden'" run="emit steps:enter"></on-enter>
+  <on-event name="steps:enter" handle="`
+    set $stepsState to 'visible'
+    then stagger-enter .step-item  500ms cubic-bezier(0.22,1,0.36,1) [gap: 140ms  from: left]
+  `"></on-event>
+
+  <div class="section">
+    <p class="section-label will-animate step-item">How it works</p>
+    <h2 style="font-size:1.5rem;font-weight:600;letter-spacing:-0.02em;margin:0 0 0.5rem" class="will-animate step-item">
+      Wrap. Declare. Animate.
+    </h2>
+    <p style="color:var(--muted);font-size:0.9rem;margin:0" class="will-animate step-item">
+      The <code>&lt;local-event-script&gt;</code> wraps its section content
+      so IntersectionObserver has real height to observe.
+    </p>
+    <div class="steps">
+      <div class="step will-animate step-item">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h3>Wrap the section content</h3>
+          <p>Put content <em>inside</em> <code>&lt;local-event-script&gt;</code>.
+          The element becomes the IO target and has real layout height.</p>
+        </div>
+      </div>
+      <div class="step will-animate step-item">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h3>Declare lifecycle hooks</h3>
+          <p><code>&lt;on-enter when="$state == 'hidden'"&gt;</code> fires once.
+          Omit the <code>when</code> guard and it fires on every crossing.</p>
+        </div>
+      </div>
+      <div class="step will-animate step-item">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h3>Handle the event</h3>
+          <p>The handler runs <code>stagger-enter</code> or any primitive.
+          <code>then</code> sequences steps; <code>and</code> runs them in parallel.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</local-event-script>
+
+<hr class="section-divider">
+
+
+<!-- ══════════════════════════════════════════════════════
+  SECTION 4 — Counter (bidirectional — NO when guard)
+  Animates in AND out on every viewport crossing.
+══════════════════════════════════════════════════════ -->
+<local-event-script id="section-counter">
+  <use-module type="animation"></use-module>
+  <on-enter run="emit counter:enter"></on-enter>
+  <on-exit  run="emit counter:exit"></on-exit>
+  <on-event name="counter:enter" handle="`
+    stagger-enter .counter-item  580ms cubic-bezier(0.22,1,0.36,1) [gap: 100ms  from: down]
+  `"></on-event>
+  <on-event name="counter:exit" handle="`
+    stagger-exit .counter-item  280ms ease-in [gap: 45ms  direction: reverse]
+  `"></on-event>
+
+  <div class="section">
+    <p class="section-label">Bidirectional — no guard</p>
+    <h2 style="font-size:1.5rem;font-weight:600;letter-spacing:-0.02em;margin:0 0 0.35rem">
+      Scroll in. Scroll out. Repeat.
+    </h2>
+    <p class="counter-intro">
+      This section has no <code>when</code> guard on <code>on-enter</code>
+      and an active <code>on-exit</code>. Scroll away and come back.
+    </p>
+    <div class="counter-row">
+      <div class="counter-item will-animate">
+        <span class="number">9</span>
+        <span class="label">primitives</span>
+      </div>
+      <div class="counter-item will-animate">
+        <span class="number">3</span>
+        <span class="label">plugin types</span>
+      </div>
+      <div class="counter-item will-animate">
+        <span class="number">30</span>
+        <span class="label">kB bundle</span>
+      </div>
+      <div class="counter-item will-animate">
+        <span class="number">0</span>
+        <span class="label">await keywords</span>
+      </div>
+    </div>
+    <div class="bidirectional-note">
+      Scroll this section out of view, then back in — the counters exit
+      upward and re-enter from below each time. No <code>when</code> guard
+      means <code>on-enter</code> and <code>on-exit</code> fire on every crossing.
+    </div>
+  </div>
+</local-event-script>
+
+<hr class="section-divider">
+
+
+<!-- ══════════════════════════════════════════════════════
+  SECTION 5 — Quote (userland module: scroll-effects.js)
+  One-time scroll-reveal via userland primitive.
+══════════════════════════════════════════════════════ -->
+<local-event-script id="section-quote" data-signals:quoteState="'hidden'">
+  <use-module type="animation"></use-module>
+  <use-module src="./scroll-effects.js"></use-module>
+  <on-enter when="$quoteState == 'hidden'" run="emit quote:enter"></on-enter>
+  <on-event name="quote:enter" handle="`
+    set $quoteState to 'visible'
+    then scroll-reveal .quote-reveal  650ms cubic-bezier(0.22,1,0.36,1)
+  `"></on-event>
+
+  <div class="section">
+    <p class="section-label">Userland module</p>
+    <h2 style="font-size:1.5rem;font-weight:600;letter-spacing:-0.02em;margin:0" class="will-animate quote-reveal">
+      Extend with your own primitives
+    </h2>
+    <div class="quote-block">
+      <blockquote class="will-animate quote-reveal">
+        "The server should never be the source of truth for whether a CSS class
+        is currently animating. That belongs in the browser. LES is where
+        browser-local choreography lives."
+      </blockquote>
+      <cite class="will-animate quote-reveal">— from the LES design notes</cite>
+    </div>
+    <p class="module-tag will-animate quote-reveal">
+      ↑ animated via scroll-reveal from scroll-effects.js (userland module)
+    </p>
+  </div>
+</local-event-script>
+
+<hr class="section-divider">
+
+
+<!-- ══════════════════════════════════════════════════════
+  SECTION 6 — CTA
+  One-time stagger from below.
+══════════════════════════════════════════════════════ -->
+<local-event-script id="section-cta" data-signals:ctaState="'hidden'">
+  <use-module type="animation"></use-module>
+  <on-enter when="$ctaState == 'hidden'" run="emit cta:enter"></on-enter>
+  <on-event name="cta:enter" handle="`
+    set $ctaState to 'visible'
+    then stagger-enter .cta-item  580ms cubic-bezier(0.22,1,0.36,1) [gap: 100ms  from: down]
+  `"></on-event>
+
+  <div class="section">
+    <div class="cta-box">
+      <h2 class="will-animate cta-item">Start choreographing</h2>
+      <p class="will-animate cta-item">
+        Add <code>&lt;local-event-script&gt;</code> to any page. No build step required for consumers.
+      </p>
+      <div class="cta-links will-animate cta-item">
+        <a class="btn btn-primary" href="/">← all demos</a>
+        <a class="btn btn-ghost" href="/feed">activity feed →</a>
+        <a class="btn btn-ghost" href="/splash">splash screen →</a>
+      </div>
+    </div>
+  </div>
+</local-event-script>
+
+<div class="bottom-space"></div>
+
+</body>
+</html>

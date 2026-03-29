@@ -46,6 +46,12 @@ export class LocalEventScript extends HTMLElement {
   private async _init(): Promise<void> {
     console.log('[LES] <local-event-script> initializing', this.id || '(no id)')
 
+    // Pre-seed local signal store from data-signals:* attributes.
+    // The IntersectionObserver can fire before Datastar's async plugin connects,
+    // so guard expressions like `$introState == 'hidden'` would evaluate to
+    // `undefined == 'hidden'` → false without this pre-seeding step.
+    this._seedSignalsFromAttributes()
+
     // Phase 1: DOM → config
     this._config = readConfig(this)
     logConfig(this._config)
@@ -111,12 +117,49 @@ export class LocalEventScript extends HTMLElement {
 
   // ─── Signal store ─────────────────────────────────────────────────────────
 
+  /**
+   * Reads all data-signals:KEY="VALUE" attributes on the host element and
+   * pre-populates the local _signals Map with their initial values.
+   *
+   * Datastar evaluates these as JS expressions (e.g. "'hidden'" → "hidden",
+   * "0" → 0, "[]" → []). We do the same with a simple eval.
+   *
+   * This runs synchronously before any async operations so that the
+   * IntersectionObserver — which may fire before Datastar connects — sees
+   * the correct initial signal values when evaluating `when` guards.
+   */
+  private _seedSignalsFromAttributes(): void {
+    for (const attr of Array.from(this.attributes)) {
+      // Match data-signals:KEY or data-star-signals:KEY (aliased bundle)
+      const m = attr.name.match(/^data-(?:star-)?signals:(.+)$/)
+      if (!m) continue
+      const key = m[1]!
+        .replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase()) // kebab-case → camelCase
+      try {
+        // Evaluate the attribute value as a JS expression (same as Datastar does)
+        // eslint-disable-next-line no-new-func
+        const value = new Function(`return (${attr.value})`)()
+        this._signals.set(key, value)
+        console.log(`[LES] seeded $${key} =`, value)
+      } catch {
+        // If it fails, store the raw string value
+        this._signals.set(key, attr.value)
+        console.log(`[LES] seeded $${key} = (raw)`, attr.value)
+      }
+    }
+  }
+
   private _getSignal(name: string): unknown {
     // Phase 6: prefer Datastar signal tree when bridge is connected
     if (this._dsSignal) {
       try { return this._dsSignal(name).value } catch { /* fall through */ }
     }
-    return this._signals.get(name)
+    // Try exact case first (e.g. Datastar-set signals are camelCase).
+    // Fall back to lowercase because HTML normalizes attribute names to lowercase,
+    // so data-signals:introState → seeded as "introstate", but guards reference "$introState".
+    if (this._signals.has(name)) return this._signals.get(name)
+    if (this._signals.has(name.toLowerCase())) return this._signals.get(name.toLowerCase())
+    return undefined
   }
 
   private _setSignal(name: string, value: unknown): void {

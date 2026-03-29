@@ -54,7 +54,7 @@ serve({ fetch: app.fetch, port: PORT }, () => {
   console.log(`  │  /          gallery (index.html)                   │`)
   console.log(`  │  /feed      activity feed demo                     │`)
   console.log(`  │  /splash    splash screen demo                      │`)
-  console.log(`  │  /scroll    scroll reveal (coming soon)            │`)
+  console.log(`  │  /scroll    scroll reveal demo                      │`)
   console.log(`  │  /cards     card interactions (coming soon)        │`)
   console.log(`  │  /form      form choreography (coming soon)        │`)
   console.log(`  │                                                    │`)
