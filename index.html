@@ -3,292 +3,416 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>local-event-script — activity feed demo</title>
-
-  <script type="importmap">
-    {
-      "imports": {
-        "datastar": "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js"
-      }
-    }
-  </script>
-
-  <script type="module" src="/dist/local-event-script.js"></script>
-
+  <title>local-event-script — demos</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --border:   #2a2d3a;
+      --text:     #e2e4ec;
+      --muted:    #6b7280;
+      --accent:   #7c6cf7;
+      --accent-2: #4ade80;
+      --accent-3: #f59e0b;
+    }
+
     body {
       font-family: system-ui, sans-serif;
-      max-width: 860px;
-      margin: 2rem auto;
-      padding: 0 1.5rem;
-      color: #222;
-    }
-    h1 { font-size: 1.4rem; font-weight: 500; margin-bottom: 0.25rem; }
-    .subtitle { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
-
-    .boundary-note {
-      background: #f0fdf4;
-      border-left: 3px solid #22c55e;
-      padding: 0.75rem 1rem;
-      border-radius: 0 6px 6px 0;
-      margin-bottom: 1.5rem;
-      font-size: 0.875rem;
-    }
-    .boundary-note strong { color: #15803d; }
-    .boundary-note code { background: #dcfce7; padding: 0 3px; border-radius: 3px; }
-
-    .feed-controls {
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      min-height: 100vh;
       display: flex;
-      gap: 0.6rem;
-      margin-bottom: 1rem;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 3rem 2rem 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .wordmark {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 0.75rem;
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+
+    .tagline {
+      color: var(--muted);
+      font-size: 1rem;
+      margin: 0 0 0.5rem;
+      line-height: 1.6;
+    }
+
+    .pills {
+      display: flex;
+      gap: 0.4rem;
       flex-wrap: wrap;
-      align-items: center;
+      margin-top: 1rem;
     }
-    .feed-controls button {
-      padding: 0.4rem 0.9rem;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      background: #fff;
-      cursor: pointer;
-      font-size: 0.875rem;
-    }
-    .feed-controls button:hover { background: #f9fafb; }
-    .feed-controls .sep { color: #d1d5db; }
 
-    .feed-item {
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      margin-bottom: 0.5rem;
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      opacity: 0;
-      transform: translateX(60px);
-    }
-    .feed-item .badge {
-      background: #e0f2fe;
-      color: #0369a1;
-      border-radius: 4px;
-      padding: 0.2rem 0.5rem;
-      font-size: 0.75rem;
-      white-space: nowrap;
-    }
-    .feed-item.is-new     { border-color: #6ee7b7; }
-    .feed-item.is-updated { border-color: #fbbf24; }
-
-    #feed-state {
-      font-size: 0.75rem;
-      color: #9ca3af;
-      margin-left: auto;
+    .pill {
+      font-size: 0.7rem;
+      font-weight: 500;
       padding: 0.2rem 0.6rem;
-      border-radius: 4px;
-      background: #f3f4f6;
-      font-variant-numeric: tabular-nums;
-      transition: color 0.2s;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      letter-spacing: 0.03em;
     }
-    #feed-state[data-state="loading"]   { color: #d97706; background: #fef3c7; }
-    #feed-state[data-state="live"]      { color: #15803d; background: #dcfce7; }
-    #feed-state[data-state="filtering"] { color: #4338ca; background: #e0e7ff; }
-    #feed-state[data-state="error"]     { color: #b91c1c; background: #fee2e2; }
 
-    hr { margin: 2rem 0; border: none; border-top: 1px solid #e5e7eb; }
-    #debug-log {
-      background: #111;
-      color: #c8ffa7;
-      font-family: monospace;
-      font-size: 0.78rem;
-      padding: 1rem;
-      border-radius: 6px;
-      height: 200px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 2rem 4rem;
+      width: 100%;
     }
+
+    .section-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .demo-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.4rem;
+      text-decoration: none;
+      color: inherit;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      transition: border-color 0.15s, transform 0.1s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .demo-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    .demo-card.coming-soon {
+      opacity: 0.5;
+      pointer-events: none;
+      cursor: default;
+    }
+
+    .demo-card .card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+
+    .demo-icon {
+      font-size: 1.5rem;
+      line-height: 1;
+    }
+
+    .demo-status {
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 0.15rem 0.5rem;
+      border-radius: 100px;
+    }
+
+    .demo-status.live {
+      background: #14532d;
+      color: #4ade80;
+    }
+
+    .demo-status.soon {
+      background: #1c1917;
+      color: #78716c;
+      border: 1px solid #292524;
+    }
+
+    .demo-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    .demo-desc {
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.5;
+      margin: 0;
+      flex: 1;
+    }
+
+    .demo-tags {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+
+    .demo-tag {
+      font-size: 0.65rem;
+      font-weight: 500;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      background: #1e2030;
+      color: #818cf8;
+      border: 1px solid #2e3148;
+      font-family: monospace;
+      letter-spacing: 0.02em;
+    }
+
+    .demo-card:hover .demo-tag {
+      border-color: #4338ca;
+    }
+
+    .concepts-section {
+      margin-top: 2.5rem;
+    }
+
+    .concept-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .concept-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+
+    .concept-card .concept-name {
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: var(--accent);
+      margin-bottom: 0.35rem;
+      font-weight: 600;
+    }
+
+    .concept-card .concept-desc {
+      font-size: 0.78rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    footer {
+      margin-top: auto;
+      padding: 1.5rem 2rem;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    footer a { color: var(--muted); text-decoration: underline; }
+    footer a:hover { color: var(--text); }
   </style>
 </head>
 <body>
 
-<script>
-  (function() {
-    var buf = [];
-    var orig = console.log.bind(console);
-    function flush(line) {
-      var el = document.getElementById('debug-log');
-      if (el) { if (buf.length) { el.textContent += buf.join('\n') + '\n'; buf = []; } el.textContent += line + '\n'; el.scrollTop = el.scrollHeight; }
-      else buf.push(line);
-    }
-    console.log = function() {
-      orig.apply(console, arguments);
-      var a = Array.prototype.slice.call(arguments);
-      var f = a[0];
-      if (typeof f === 'string' && (f.startsWith('[LES') || f.startsWith('[demo') || f.startsWith('[feed') || f.startsWith('[mock'))) {
-        flush(a.map(function(x) { return typeof x === 'object' ? JSON.stringify(x) : String(x); }).join(' '));
-      }
-    };
-    document.addEventListener('DOMContentLoaded', function() {
-      var el = document.getElementById('debug-log');
-      if (el && buf.length) { el.textContent = buf.join('\n') + '\n'; buf = []; }
-    });
-  })();
-</script>
+<header>
+  <p class="wordmark">local-event-script</p>
+  <h1>Browser-local event choreography</h1>
+  <p class="tagline">
+    A Datastar plugin + standalone custom element for sequencing animations,
+    lifecycle hooks, and browser-side events — without touching the server.
+  </p>
+  <div class="pills">
+    <span class="pill">Datastar RC.8</span>
+    <span class="pill">Web Animations API</span>
+    <span class="pill">Custom Elements</span>
+    <span class="pill">CQRS / Event Sourcing</span>
+    <span class="pill">D3 enter/update/exit</span>
+    <span class="pill">Async transparent</span>
+  </div>
+</header>
 
-<h1>local-event-script + Datastar</h1>
-<p class="subtitle">Activity feed demo &middot; LES owns animation &middot; Datastar owns DOM</p>
+<main>
 
-<div class="boundary-note">
-  <strong>Boundary:</strong>
-  Datastar SSE (<code>GET /api/feed</code>) removes old items and appends new ones.
-  LES animates them as they arrive/leave.
-  Items start at <code>opacity:0; transform:translateX(60px)</code> via CSS &mdash;
-  LES <code>stagger-enter</code> brings them to life.
-</div>
+  <p class="section-label">Demos</p>
 
-<local-event-script
-  id="activity-feed"
-  data-signals:feedState="'idle'"
-  data-signals:feedItems="[]"
-  data-signals:feedItemCount="0"
-  data-signals:activeFilter="'all'"
->
-  <use-module type="animation"></use-module>
-  <use-module src="./scroll-effects.js"></use-module>
-  <use-module src="./spring-physics.js"></use-module>
+  <div class="demo-grid">
 
-  <!-- LIFECYCLE -->
-  <on-load  run="emit feed:init"></on-load>
-  <on-enter when="$feedState == 'paused'" run="emit feed:resumed"></on-enter>
-  <on-exit  run="emit feed:paused"></on-exit>
+    <!-- ── LIVE DEMOS ─────────────────────────────────────────── -->
 
-  <!-- EVENT HANDLERS -->
-  <on-event name="feed:init" handle="`
-    set $feedState to 'loading'
-    then @get '/api/feed' [filter: $activeFilter]
-    then emit feed:data-ready
-  `"></on-event>
+    <a class="demo-card" href="/feed">
+      <div class="card-header">
+        <span class="demo-icon">📋</span>
+        <span class="demo-status live">live</span>
+      </div>
+      <h2 class="demo-title">Activity Feed</h2>
+      <p class="demo-desc">
+        Live feed with filter switching. Datastar SSE removes and appends DOM nodes;
+        LES staggers them in and out. The canonical LES/Datastar boundary demo.
+      </p>
+      <div class="demo-tags">
+        <span class="demo-tag">stagger-enter</span>
+        <span class="demo-tag">stagger-exit</span>
+        <span class="demo-tag">@get (SSE)</span>
+        <span class="demo-tag">on-signal</span>
+      </div>
+    </a>
 
-  <on-event name="feed:paused"  handle="set $feedState to 'paused'"></on-event>
-  <on-event name="feed:resumed" handle="`
-    set $feedState to 'loading'
-    then @get '/api/feed' [filter: $activeFilter]
-    then emit feed:data-ready
-  `"></on-event>
+    <!-- ── COMING SOON ────────────────────────────────────────── -->
 
-  <on-signal
-    name="$feedItems"
-    when="$feedState == 'live'"
-    handle="emit feed:server-pushed [$feedItems]"
-  ></on-signal>
+    <a class="demo-card coming-soon" href="/splash">
+      <div class="card-header">
+        <span class="demo-icon">✨</span>
+        <span class="demo-status soon">coming soon</span>
+      </div>
+      <h2 class="demo-title">Splash Screen</h2>
+      <p class="demo-desc">
+        Page load animation sequence. Parallel fade + slide, then a timed
+        wait, then a chained exit. Shows <code>then</code>/<code>and</code>
+        as sequencing primitives.
+      </p>
+      <div class="demo-tags">
+        <span class="demo-tag">fade-in</span>
+        <span class="demo-tag">slide-up</span>
+        <span class="demo-tag">wait</span>
+        <span class="demo-tag">broadcast</span>
+      </div>
+    </a>
 
-  <!--
-    Filter flow:
-    1. 'filtering' state blocks on-signal re-trigger
-    2. Extract new filter from payload[0]
-    3. LES exits current items (animation)
-    4. Datastar @get → server patches DOM (removes old, appends new)
-    5. LES enters new items (animation)
-  -->
-  <on-event name="feed:filter-changed" handle="`
-    set $feedState to 'filtering'
-    then set $activeFilter to payload[0]
-    then call feed:exit-all
-    then @get '/api/feed' [filter: $activeFilter]
-    then emit feed:data-ready
-  `"></on-event>
+    <a class="demo-card coming-soon" href="/scroll">
+      <div class="card-header">
+        <span class="demo-icon">📜</span>
+        <span class="demo-status soon">coming soon</span>
+      </div>
+      <h2 class="demo-title">Scroll Reveal</h2>
+      <p class="demo-desc">
+        Sections animate in as they enter the viewport and out as they leave.
+        Uses <code>on-enter</code>/<code>on-exit</code> with IntersectionObserver
+        and the <code>scroll-effects</code> userland module.
+      </p>
+      <div class="demo-tags">
+        <span class="demo-tag">on-enter</span>
+        <span class="demo-tag">on-exit</span>
+        <span class="demo-tag">scroll-reveal</span>
+        <span class="demo-tag">use-module src=</span>
+      </div>
+    </a>
 
-  <on-event name="feed:data-ready" handle="`
-    set $feedState to 'live'
-    then call feed:enter-items
-    then broadcast feed:ready
-  `"></on-event>
+    <a class="demo-card coming-soon" href="/cards">
+      <div class="card-header">
+        <span class="demo-icon">🃏</span>
+        <span class="demo-status soon">coming soon</span>
+      </div>
+      <h2 class="demo-title">Card Interactions</h2>
+      <p class="demo-desc">
+        Cards with flip, expand, and dismiss animations driven by user events.
+        Shows pattern-matched state machines: each card moves through
+        hidden → entering → visible → exiting → hidden.
+      </p>
+      <div class="demo-tags">
+        <span class="demo-tag">match</span>
+        <span class="demo-tag">guard</span>
+        <span class="demo-tag">pulse</span>
+        <span class="demo-tag">item:dismissed</span>
+      </div>
+    </a>
 
-  <on-event name="feed:server-pushed" handle="`
-    call feed:update-items
-    then call feed:exit-stale-items
-    then call feed:enter-new-items
-  `"></on-event>
+    <a class="demo-card coming-soon" href="/form">
+      <div class="card-header">
+        <span class="demo-icon">📝</span>
+        <span class="demo-status soon">coming soon</span>
+      </div>
+      <h2 class="demo-title">Form Choreography</h2>
+      <p class="demo-desc">
+        Multi-step form where each step slides in from the right, validation
+        errors shake the field, and success triggers a celebration sequence.
+        Datastar owns form state; LES owns every animation.
+      </p>
+      <div class="demo-tags">
+        <span class="demo-tag">try/rescue</span>
+        <span class="demo-tag">slide-in</span>
+        <span class="demo-tag">on-signal</span>
+        <span class="demo-tag">afterwards</span>
+      </div>
+    </a>
 
-  <on-event name="item:dismissed" handle="`
-    call feed:exit-item [id: event.detail.id]
-    then broadcast item:dismissed [event.detail.id]
-  `"></on-event>
+  </div>
 
-  <on-event name="feed:error" handle="`
-    set $feedState to 'error'
-    then broadcast feed:error [$error]
-  `"></on-event>
+  <!-- ── LES CONCEPT MAP ───────────────────────────────────────────────── -->
 
-  <!-- COMMANDS — animation only, no data fetching -->
-  <local-command name="feed:enter-items" do="`
-    stagger-enter .feed-item  320ms cubic-bezier(0.22,1,0.36,1) [gap: 55ms  from: right]
-  `"></local-command>
+  <div class="concepts-section">
+    <p class="section-label">Language concepts</p>
+    <div class="concept-grid">
+      <div class="concept-card">
+        <div class="concept-name">then / and</div>
+        <div class="concept-desc">Sequential and parallel async composition. Async-transparent — no <code>await</code> needed.</div>
+      </div>
+      <div class="concept-card">
+        <div class="concept-name">emit / broadcast</div>
+        <div class="concept-desc"><code>emit</code> dispatches locally. <code>broadcast</code> bubbles through the full DOM.</div>
+      </div>
+      <div class="concept-card">
+        <div class="concept-name">call / @get</div>
+        <div class="concept-desc"><code>call</code> invokes a local command. <code>@get</code> is a Datastar backend action.</div>
+      </div>
+      <div class="concept-card">
+        <div class="concept-name">match / /match</div>
+        <div class="concept-desc">Pattern-matched branching. First arm wins. Wildcard <code>[_]</code> as fallback.</div>
+      </div>
+      <div class="concept-card">
+        <div class="concept-name">try / rescue / afterwards</div>
+        <div class="concept-desc">Error handling with optional cleanup. <code>guard</code> rejection never triggers either clause.</div>
+      </div>
+      <div class="concept-card">
+        <div class="concept-name">on-enter / on-exit</div>
+        <div class="concept-desc">IntersectionObserver lifecycle. Optional <code>when</code> guard for conditional firing.</div>
+      </div>
+      <div class="concept-card">
+        <div class="concept-name">on-signal</div>
+        <div class="concept-desc">Reactive Datastar signal watcher. <code>when</code> guard evaluated on every change.</div>
+      </div>
+      <div class="concept-card">
+        <div class="concept-name">use-module</div>
+        <div class="concept-desc">Import built-in or userland animation primitives. <code>type=</code> for built-in, <code>src=</code> for custom.</div>
+      </div>
+    </div>
+  </div>
 
-  <local-command name="feed:enter-new-items" do="`
-    stagger-enter .feed-item.is-new  280ms cubic-bezier(0.22,1,0.36,1) [gap: 45ms  from: right]
-  `"></local-command>
+</main>
 
-  <local-command name="feed:update-items" do="`
-    pulse .feed-item.is-updated  480ms ease-in-out
-  `"></local-command>
-
-  <local-command name="feed:exit-all" do="`
-    stagger-exit .feed-item  200ms ease-in [gap: 30ms  direction: reverse]
-  `"></local-command>
-
-  <local-command name="feed:exit-stale-items" do="`
-    stagger-exit .feed-item.is-stale  180ms ease-in [gap: 25ms]
-  `"></local-command>
-
-  <local-command name="feed:exit-item" args="[id:str]" do="`
-    slide-out [data-item-id: id]  240ms cubic-bezier(0.4,0,1,1) [to: right]
-  `"></local-command>
-
-</local-event-script>
-
-
-<!-- UI outside LES — state indicator driven by Datastar -->
-<div class="feed-controls">
-  <button onclick="les().fire('feed:filter-changed', ['all'])">Filter: all</button>
-  <button onclick="les().fire('feed:filter-changed', ['unread'])">Filter: unread</button>
-  <button onclick="les().fire('feed:filter-changed', ['mentions'])">Filter: mentions</button>
-  <span class="sep">|</span>
-  <button onclick="les().call('feed:enter-items')"  style="background:#e0f2fe">&#8595; Enter items</button>
-  <button onclick="les().call('feed:exit-all')"     style="background:#fce7f3">&#8593; Exit all</button>
-  <button onclick="les().call('feed:update-items')" style="background:#fef3c7">&#10022; Pulse updated</button>
-  <span class="sep">|</span>
-  <button onclick="fireItemDismissed('1')">&#215; Dismiss #1</button>
-  <span id="feed-state" data-attr:data-state="$feedState" data-text="$feedState"></span>
-</div>
-
-<!--
-  Items are rendered INTO here by Datastar SSE from GET /api/feed.
-  This div starts empty — the server populates it on page load.
--->
-<div id="feed-container"></div>
-
-<hr>
-<p style="font-size:0.8rem;color:#999">Debug log</p>
-<div id="debug-log"></div>
-
-<script>
-  function les() { return document.querySelector('local-event-script'); }
-
-  function fireItemDismissed(id) {
-    console.log('[demo] item:dismissed id=' + id);
-    les().dispatchEvent(new CustomEvent('item:dismissed', {
-      detail: { id: id, payload: [] }, bubbles: false
-    }));
-  }
-
-  document.addEventListener('feed:ready', function() {
-    console.log('[demo] feed:ready — items live in DOM');
-  });
-  document.addEventListener('item:dismissed', function(e) {
-    console.log('[demo] item:dismissed broadcast:', JSON.stringify(e.detail));
-  });
-</script>
+<footer>
+  <a href="https://github.com/Xs-and-10s/local-event-script" target="_blank">GitHub</a>
+  &nbsp;&middot;&nbsp;
+  built with <a href="https://data-star.dev" target="_blank">Datastar</a>
+  &nbsp;&middot;&nbsp;
+  <span style="font-family:monospace">local-event-script v0.1.0</span>
+</footer>
 
 </body>
 </html>
