@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Earthquakes, Wind &amp; Fire — LES</title>
+  <meta name="description" content="Geospatial choreography: D3 + Datastar + LES over a live US map. Earthquakes, wind vectors, wildfire heatmaps, and seismic contours.">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://www.youtube.com">
+
+  <!-- @the-design-system/layout v0.2.0 — design tokens (must be first) -->
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/@the-design-system/layout@0.2.0/dist/core.min.css"
+  >
+
+  <!--
+    Importmap — all module imports resolved by name.
+    d3@7 resolves to the latest v7 on jsDelivr (currently 7.9.0 once cached,
+    or the highest cached 7.x). Using the major-only pin avoids the 404 that
+    hit a specific patch version before jsDelivr pre-caches it.
+  -->
+  <script type="importmap">
+    {
+      "imports": {
+        "datastar": "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js",
+        "d3":       "https://cdn.jsdelivr.net/npm/d3@7/+esm"
+      }
+    }
+  </script>
+
+  <!-- Turf v7.3.4 — UMD, exposes window.turf synchronously -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.3.4/turf.min.js"></script>
+
+  <!-- LES -->
+  <script type="module" src="/dist/local-event-script.js"></script>
+
+  <style>
+    /* ── Design tokens — lime-green dark theme ──────────────────────── */
+    :root {
+      /* Backgrounds: very slightly green-tinted dark */
+      --bg:           #08100a;
+      --surface:      #101a12;
+      --surface-2:    #172019;
+      --border:       #1f3022;
+      --text:         #d0e8d4;
+      --muted:        #5a7862;
+
+      /* Accent: electric lime (matches earthquake/seismic palette) */
+      --accent:       oklch(0.78 0.20 135);
+      --accent-dim:   oklch(0.60 0.16 135);
+      --accent-glow:  oklch(0.87 0.23 135 / 0.15);
+
+      /* Layer palette — OKLCH */
+      --lime-bright:  oklch(0.87 0.23 135);   /* earthquake spikes & seismic isobands */
+      --lime-dim:     oklch(0.65 0.18 135);
+      --fire-hot:     oklch(0.72 0.22 35);    /* wildfire — red-orange */
+      --fire-warm:    oklch(0.82 0.20 60);    /* wildfire — amber */
+      --temp-cool:    oklch(0.55 0.14 240);   /* temperature — blue */
+      --temp-warm:    oklch(0.85 0.18 85);    /* temperature — yellow */
+      --wind-arrow:   oklch(0.90 0.06 210);   /* wind triangles — cyan-white */
+
+      /* UI sizing */
+      --header-h:     52px;
+      --footer-h:     88px;
+      --modal-radius: 16px;
+      --glass-bg:     color-mix(in oklch, var(--surface) 78%, transparent);
+      --glass-blur:   20px;
+      --glass-border: color-mix(in oklch, var(--border) 70%, transparent);
+    }
+
+    /* ── Reset ──────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      height: 100%;
+    }
+
+    /* ── sandwich-layout shell ──────────────────────────────────────── */
+    sandwich-layout {
+      width: 100%;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    #app-header {
+      height: var(--header-h);
+      padding: 0 1rem;
+      border-bottom: 1px solid var(--border);
+      background: color-mix(in oklch, var(--surface) 92%, transparent);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      position: relative;
+      z-index: 10;
+    }
+
+    #app-header cluster-layout { height: 100%; }
+
+    .nav-back {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      transition: color 0.15s;
+    }
+    .nav-back:hover { color: var(--text); }
+
+    .brand {
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      font-variant: small-caps;
+      color: var(--accent);
+    }
+
+    #hamburger-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      cursor: pointer;
+      width: 36px; height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+      view-transition-name: settings-trigger;
+    }
+    #hamburger-btn:hover {
+      border-color: var(--accent);
+      background: var(--accent-glow);
+      box-shadow: 0 0 8px var(--accent-glow);
+    }
+    #hamburger-btn svg { pointer-events: none; }
+
+    /* ── Map container ──────────────────────────────────────────────── */
+    #map-container {
+      position: relative;
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+      width: 100%; height: 100%;
+      opacity: 0;
+    }
+
+    #flights-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .map-layer { opacity: 0; }
+
+    /* ── Footer ─────────────────────────────────────────────────────── */
+    #timeline-footer {
+      position: relative;
+      z-index: 10;
+      background: var(--glass-bg);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      border-top: 1px solid var(--glass-border);
+      padding: 0.75rem 1rem;
+      opacity: 0;
+    }
+
+    .timeline-track {
+      position: relative;
+      width: 100%;
+    }
+
+    #scrubber {
+      width: 100%;
+      height: 4px;
+      accent-color: var(--accent);
+      cursor: pointer;
+      margin: 0;
+    }
+
+    #presence-indicators {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .presence-triangle {
+      position: absolute;
+      top: 0;
+      transform: translateX(-50%);
+      width: 0; height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 8px solid currentColor;
+      transition: left 0.3s ease;
+    }
+
+    .presence-badge {
+      position: absolute;
+      top: 10px;
+      transform: translateX(-50%);
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      border: 2px solid currentColor;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: inherit;
+    }
+
+    .presence-badge.is-pinned {
+      animation: badge-pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes badge-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, currentColor 50%, transparent); transform: translateX(-50%) scale(1); }
+      50%       { box-shadow: 0 0 0 4px color-mix(in oklch, currentColor 20%, transparent); transform: translateX(-50%) scale(1.25); }
+    }
+
+    .timeline-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+
+    .ctrl-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      width: 32px; height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+      padding: 0;
+    }
+    .ctrl-btn:hover {
+      border-color: var(--accent);
+      background: var(--accent-glow);
+      box-shadow: 0 0 6px var(--accent-glow);
+    }
+    .ctrl-btn.is-active { border-color: var(--accent); color: var(--accent); }
+
+    .time-display {
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: var(--muted);
+      white-space: nowrap;
+      margin-left: auto;
+    }
+
+    .speed-label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .pin-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+      padding: 0.1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s;
+    }
+    .pin-btn:hover { color: var(--text); }
+    .pin-btn.is-pinned { color: var(--accent); }
+    .pin-btn.is-system-pinned { color: var(--muted); opacity: 0.6; }
+
+    /* ── Splash ─────────────────────────────────────────────────────── */
+    #splash {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.5rem;
+    }
+
+    .splash-title {
+      font-size: clamp(1.6rem, 5vw, 2.4rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      text-align: center;
+      /* Subtle lime glow on title */
+      text-shadow: 0 0 40px oklch(0.87 0.23 135 / 0.3);
+    }
+
+    .splash-subtitle {
+      font-size: 0.875rem;
+      color: var(--muted);
+      text-align: center;
+      max-width: 360px;
+      line-height: 1.65;
+    }
+
+    .splash-subtitle strong {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* ── Sign-in ─────────────────────────────────────────────────────── */
+    #signin-overlay {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      width: 100%;
+      max-width: 320px;
+    }
+
+    #signin-overlay.is-submitted {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .signin-label {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .signin-hint {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    #signin-input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem 1rem;
+      color: var(--text);
+      font-size: 1rem;
+      font-family: inherit;
+      outline: none;
+      text-align: center;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    #signin-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    #signin-input::placeholder { color: var(--muted); }
+
+    #signin-submit {
+      width: 100%;
+      background: var(--accent);
+      border: none;
+      border-radius: 10px;
+      color: #030f05;          /* dark text on lime */
+      font-size: 0.9rem;
+      font-weight: 700;
+      padding: 0.75rem;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity 0.15s, box-shadow 0.15s;
+    }
+    #signin-submit:hover {
+      opacity: 0.9;
+      box-shadow: 0 0 16px oklch(0.87 0.23 135 / 0.4);
+    }
+    #signin-submit:disabled { opacity: 0.3; cursor: not-allowed; box-shadow: none; }
+
+    /* ── Loading state ───────────────────────────────────────────────── */
+    #splash-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.75rem;
+      opacity: 0;
+      transition: opacity 0.3s ease 0.2s;
+    }
+    #splash-loading.is-visible { opacity: 1; }
+
+    .loading-dots {
+      display: flex;
+      gap: 0.4rem;
+    }
+    .loading-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: dot-bounce 1.2s ease-in-out infinite;
+    }
+    .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+    .loading-dot:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes dot-bounce {
+      0%, 80%, 100% { transform: scale(0.8); opacity: 0.35; }
+      40%            { transform: scale(1.2); opacity: 1; }
+    }
+
+    .loading-status {
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-family: monospace;
+    }
+
+    .loading-items {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.3rem;
+    }
+
+    .loading-item {
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-family: monospace;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .loading-item::before { content: '○'; color: var(--border); }
+    .loading-item.is-done::before { content: '●'; color: var(--lime-bright); }
+
+    /* ── Settings modal ──────────────────────────────────────────────── */
+    #settings-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 150;
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-end;
+      padding: 0.5rem;
+      pointer-events: none;
+      opacity: 0;
+      view-transition-name: settings-panel;
+    }
+
+    #settings-modal.is-open {
+      pointer-events: auto;
+      opacity: 1;
+    }
+
+    .modal-panel {
+      background: var(--glass-bg);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      border: 1px solid var(--glass-border);
+      border-radius: var(--modal-radius);
+      padding: 1.25rem;
+      width: min(360px, calc(100vw - 1rem));
+      max-height: calc(100dvh - 1rem);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      box-shadow: 0 8px 32px color-mix(in oklch, #000 50%, transparent),
+                  0 0 0 1px oklch(0.87 0.23 135 / 0.05);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    #modal-close-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      cursor: pointer;
+      width: 28px; height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    #modal-close-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .modal-section {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .modal-section-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent-dim);
+      padding-bottom: 0.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .layer-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+
+    .layer-label {
+      font-size: 0.82rem;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .layer-swatch {
+      width: 10px; height: 10px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .toggle-switch {
+      width: 36px; height: 20px;
+      background: var(--border);
+      border-radius: 10px;
+      position: relative;
+      cursor: pointer;
+      border: none;
+      flex-shrink: 0;
+      transition: background 0.2s;
+    }
+    .toggle-switch.is-on { background: var(--accent); }
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: white;
+      top: 3px; left: 3px;
+      transition: transform 0.2s;
+    }
+    .toggle-switch.is-on::after { transform: translateX(16px); }
+
+    .weight-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .weight-label {
+      font-size: 0.78rem;
+      color: var(--text);
+      width: 80px;
+      flex-shrink: 0;
+    }
+
+    .weight-slider {
+      flex: 1;
+      height: 4px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    .weight-slider:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .weight-value {
+      font-family: monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      width: 32px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .worker-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .worker-label { font-size: 0.82rem; color: var(--text); flex: 1; }
+
+    .worker-value {
+      font-family: monospace;
+      font-size: 0.82rem;
+      color: var(--accent);
+      width: 24px;
+      text-align: center;
+    }
+
+    .audio-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .audio-label { font-size: 0.72rem; color: var(--muted); flex: 1; }
+
+    /* ── View Transitions ────────────────────────────────────────────── */
+    @supports (view-transition-name: none) {
+      ::view-transition-old(settings-trigger),
+      ::view-transition-new(settings-trigger),
+      ::view-transition-old(settings-panel),
+      ::view-transition-new(settings-panel) {
+        animation-duration: 280ms;
+        animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+      }
+    }
+
+    /* ── Modal backdrop ──────────────────────────────────────────────── */
+    #modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 140;
+      background: color-mix(in oklch, #000 50%, transparent);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s;
+    }
+    #modal-backdrop.is-open { opacity: 1; pointer-events: auto; }
+
+    /* ── Attribution ─────────────────────────────────────────────────── */
+    #attribution {
+      position: fixed;
+      bottom: calc(var(--footer-h) + 4px);
+      right: 0.5rem;
+      z-index: 5;
+      font-size: 0.6rem;
+      color: color-mix(in oklch, var(--muted) 55%, transparent);
+      display: flex;
+      gap: 0.5rem;
+      pointer-events: none;
+    }
+    #attribution a {
+      color: inherit;
+      text-decoration: none;
+      pointer-events: auto;
+    }
+    #attribution a:hover { color: var(--muted); }
+
+    /* ── Responsive ──────────────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      :root { --footer-h: 110px; }
+
+      .modal-panel {
+        width: 100%;
+        border-radius: var(--modal-radius) var(--modal-radius) 0 0;
+        position: fixed;
+        bottom: 0; left: 0;
+        max-height: 80dvh;
+      }
+
+      #settings-modal {
+        align-items: flex-end;
+        justify-content: stretch;
+        padding: 0;
+      }
+
+      .timeline-controls { flex-wrap: wrap; gap: 0.4rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!--
+    ═══════════════════════════════════════════════════════════════════
+    YOUTUBE IFRAME — permanently offscreen
+    Audio starts after the sign-in user gesture (browser autoplay policy).
+    ═══════════════════════════════════════════════════════════════════
+  -->
+  <iframe
+    id="yt-player"
+    src="https://www.youtube.com/embed/Gs069dndIYk?enablejsapi=1&autoplay=0&controls=0&loop=0&mute=0"
+    title="Living Map ambient audio"
+    allow="autoplay"
+    style="position:absolute;left:-9999px;width:1px;height:1px;border:0"
+    tabindex="-1"
+    aria-hidden="true"
+  ></iframe>
+  <script src="https://www.youtube.com/iframe_api" async></script>
+
+  <!--
+    ═══════════════════════════════════════════════════════════════════
+    SPLASH
+    ═══════════════════════════════════════════════════════════════════
+  -->
+  <div id="splash" role="dialog" aria-modal="true" aria-label="Welcome to Living Map">
+    <p class="splash-title">Living Map</p>
+    <p class="splash-subtitle">
+      <strong>Earthquakes · Wind · Wildfires</strong><br>
+      Real-time geospatial choreography — <strong>D3</strong>, <strong>Datastar</strong>, and <strong>LES</strong>.
+    </p>
+
+    <div id="signin-overlay" role="form" aria-label="Identify yourself">
+      <label class="signin-label" for="signin-input">Who are you?</label>
+      <p class="signin-hint">Just a name — no account, no password.<br>You'll appear on the shared timeline.</p>
+      <input
+        id="signin-input"
+        type="text"
+        placeholder="e.g. Jane Smith"
+        maxlength="40"
+        autocomplete="name"
+        spellcheck="false"
+        aria-required="true"
+      >
+      <button id="signin-submit" type="button" disabled>Enter the map →</button>
+    </div>
+
+    <div id="splash-loading" aria-live="polite">
+      <div class="loading-dots" aria-hidden="true">
+        <div class="loading-dot"></div>
+        <div class="loading-dot"></div>
+        <div class="loading-dot"></div>
+      </div>
+      <p class="loading-status">Loading map data…</p>
+      <div class="loading-items" role="list">
+        <div class="loading-item" id="li-earthquakes" role="listitem">Earthquake feed (USGS)</div>
+        <div class="loading-item" id="li-weather"     role="listitem">Wind &amp; temperature (Open-Meteo)</div>
+        <div class="loading-item" id="li-fires"       role="listitem">Wildfire hotspots (NASA FIRMS)</div>
+        <div class="loading-item" id="li-analysis"    role="listitem">Spatial analysis (Turf.js)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal backdrop -->
+  <div id="modal-backdrop" aria-hidden="true"></div>
+
+  <!--
+    ═══════════════════════════════════════════════════════════════════
+    SETTINGS MODAL
+    ═══════════════════════════════════════════════════════════════════
+  -->
+  <div id="settings-modal" role="dialog" aria-modal="true" aria-label="Map settings" aria-hidden="true">
+    <div class="modal-panel">
+
+      <div class="modal-header">
+        <span class="modal-title">Settings</span>
+        <button id="modal-close-btn" aria-label="Close settings">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Map layers -->
+      <div class="modal-section">
+        <p class="modal-section-label">Map layers</p>
+        <div class="layer-row">
+          <span class="layer-label"><span class="layer-swatch" style="background:var(--wind-arrow)"></span>Wind field</span>
+          <button class="toggle-switch is-on" data-layer="wind" aria-label="Toggle wind layer" aria-pressed="true"></button>
+        </div>
+        <div class="layer-row">
+          <span class="layer-label"><span class="layer-swatch" style="background:var(--temp-warm)"></span>Temperature</span>
+          <button class="toggle-switch is-on" data-layer="temp" aria-label="Toggle temperature layer" aria-pressed="true"></button>
+        </div>
+        <div class="layer-row">
+          <span class="layer-label"><span class="layer-swatch" style="background:var(--fire-hot)"></span>Wildfire</span>
+          <button class="toggle-switch is-on" data-layer="fire" aria-label="Toggle wildfire layer" aria-pressed="true"></button>
+        </div>
+        <div class="layer-row">
+          <span class="layer-label"><span class="layer-swatch" style="background:var(--lime-dim)"></span>Seismic contours</span>
+          <button class="toggle-switch is-on" data-layer="seismic" aria-label="Toggle seismic layer" aria-pressed="true"></button>
+        </div>
+        <div class="layer-row">
+          <span class="layer-label"><span class="layer-swatch" style="background:var(--lime-bright)"></span>Spikes</span>
+          <button class="toggle-switch is-on" data-layer="spikes" aria-label="Toggle spike layer" aria-pressed="true"></button>
+        </div>
+        <div class="layer-row">
+          <span class="layer-label">
+            <span class="layer-swatch" style="background:#88aaff"></span>
+            Flights
+            <span style="font-size:0.65rem;color:var(--muted)">(needs OpenSky key)</span>
+          </span>
+          <button class="toggle-switch" data-layer="flights" aria-label="Toggle flight layer" aria-pressed="false"></button>
+        </div>
+      </div>
+
+      <!-- POI weights -->
+      <div class="modal-section">
+        <p class="modal-section-label">Camera focus weights</p>
+        <p style="font-size:0.72rem;color:var(--muted);margin:0 0 0.5rem">
+          Controls which phenomena the camera pans toward. Must sum to 1.0.
+          Pin two sliders to move only the third.
+        </p>
+        <div class="weight-row">
+          <span class="weight-label">Earthquake</span>
+          <input class="weight-slider" type="range" id="w-eq"   min="0" max="1" step="0.01" value="0.50">
+          <span class="weight-value" id="wv-eq">0.50</span>
+          <button class="pin-btn" data-weight="eq" aria-label="Pin earthquake weight" title="Pin this weight">
+            <svg width="12" height="14" viewBox="0 0 12 14" fill="none" aria-hidden="true">
+              <circle cx="6" cy="3" r="2.5" stroke="currentColor" stroke-width="1.2"/>
+              <line x1="6" y1="5.5" x2="6" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+              <line x1="3" y1="5.5" x2="9" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="weight-row">
+          <span class="weight-label">Wildfire</span>
+          <input class="weight-slider" type="range" id="w-fire" min="0" max="1" step="0.01" value="0.35">
+          <span class="weight-value" id="wv-fire">0.35</span>
+          <button class="pin-btn" data-weight="fire" aria-label="Pin wildfire weight" title="Pin this weight">
+            <svg width="12" height="14" viewBox="0 0 12 14" fill="none" aria-hidden="true">
+              <circle cx="6" cy="3" r="2.5" stroke="currentColor" stroke-width="1.2"/>
+              <line x1="6" y1="5.5" x2="6" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+              <line x1="3" y1="5.5" x2="9" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="weight-row">
+          <span class="weight-label">Temperature</span>
+          <input class="weight-slider" type="range" id="w-temp" min="0" max="1" step="0.01" value="0.15">
+          <span class="weight-value" id="wv-temp">0.15</span>
+          <button class="pin-btn" data-weight="temp" aria-label="Pin temperature weight" title="Pin this weight">
+            <svg width="12" height="14" viewBox="0 0 12 14" fill="none" aria-hidden="true">
+              <circle cx="6" cy="3" r="2.5" stroke="currentColor" stroke-width="1.2"/>
+              <line x1="6" y1="5.5" x2="6" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+              <line x1="3" y1="5.5" x2="9" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Performance -->
+      <div class="modal-section">
+        <p class="modal-section-label">Performance</p>
+        <div class="worker-row">
+          <span class="worker-label">Web Workers</span>
+          <input type="range" min="2" max="8" step="1" id="worker-slider"
+            style="flex:1;height:4px;accent-color:var(--accent);cursor:pointer"
+            aria-label="Number of web workers">
+          <span class="worker-value" id="worker-value">4</span>
+        </div>
+        <p style="font-size:0.68rem;color:var(--muted);margin:0.25rem 0 0">
+          More workers = smoother spatial analysis on multi-core devices.
+        </p>
+      </div>
+
+      <!-- Audio controls -->
+      <div class="modal-section">
+        <p class="modal-section-label">Ambient audio</p>
+        <div class="audio-controls">
+          <button class="ctrl-btn" id="audio-playpause-btn" aria-label="Play audio">
+            <svg id="audio-play-icon" width="12" height="14" viewBox="0 0 12 14" aria-hidden="true">
+              <polygon points="1,1 11,7 1,13" fill="currentColor"/>
+            </svg>
+            <svg id="audio-pause-icon" width="12" height="14" viewBox="0 0 12 14" aria-hidden="true" style="display:none">
+              <rect x="1" y="1" width="4" height="12" fill="currentColor" rx="1"/>
+              <rect x="7" y="1" width="4" height="12" fill="currentColor" rx="1"/>
+            </svg>
+          </button>
+          <button class="ctrl-btn" id="audio-restart-btn" aria-label="Restart audio from beginning">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+              <path d="M2 6.5A4.5 4.5 0 1 1 6.5 11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <polyline points="0,4 2,6.5 4.5,4.5" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </button>
+          <button class="ctrl-btn" id="audio-mute-btn" aria-label="Mute audio">
+            <svg id="audio-vol-icon" width="14" height="13" viewBox="0 0 14 13" fill="none" aria-hidden="true">
+              <path d="M1 4.5h2l4-3v10l-4-3H1z" fill="currentColor"/>
+              <path d="M9 4.5c.8.6 1.3 1.5 1.3 2.5s-.5 1.9-1.3 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+              <path d="M11 2.5c1.3 1.2 2 2.8 2 4.5s-.7 3.3-2 4.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+            </svg>
+            <svg id="audio-mute-icon" width="14" height="13" viewBox="0 0 14 13" fill="none" aria-hidden="true" style="display:none">
+              <path d="M1 4.5h2l4-3v10l-4-3H1z" fill="currentColor"/>
+              <line x1="9" y1="4" x2="13" y2="9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <line x1="13" y1="4" x2="9" y2="9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <span class="audio-label">Plays once on load</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!--
+    ═══════════════════════════════════════════════════════════════════
+    LES FEDERATION — all five instances as body-level siblings.
+
+    KEY DESIGN RULE: LES elements must NOT be nested inside each other.
+    The LES reader scans direct children for known LES elements
+    (on-event, local-command, on-signal, on-load, on-enter, on-exit,
+    use-module) and will warn about any unknown custom element child,
+    including another <local-event-script>.
+
+    Each instance is purely a control structure — no visual children.
+    Visual DOM lives in the sandwich-layout below.
+    Inter-instance communication happens via `broadcast` (dispatches
+    on document) which all instances can hear via on-event listeners.
+
+    display:none keeps them out of layout entirely while still letting
+    Datastar read their data-signals attributes.
+    ═══════════════════════════════════════════════════════════════════
+  -->
+
+  <!-- 1. Worker event bus — dispatches to window.workerPool -->
+  <local-event-script
+    id="worker-controller"
+    data-signals:workerCount="4"
+    style="display:none"
+  >
+    <!-- Commands and on-events added in Step 7 -->
+  </local-event-script>
+
+  <!-- 2. Page-level load sequencer — splash exit, data fetch orchestration -->
+  <local-event-script
+    id="page-controller"
+    data-signals:dataState="'loading'"
+    data-signals:earthquakesReady="false"
+    data-signals:weatherReady="false"
+    data-signals:firesReady="false"
+    data-signals:settingsOpen="false"
+    data-signals:audioPlaying="false"
+    data-signals:audioMuted="false"
+    style="display:none"
+  >
+    <!-- Commands and on-events added in Step 7 -->
+  </local-event-script>
+
+  <!-- 3. Map animator — camera pan, screen shake, layer enter/exit -->
+  <local-event-script
+    id="map-controller"
+    data-signals:strongestPOI="null"
+    data-signals:shakeIntensity="0"
+    data-signals:flightsEnabled="false"
+    data-signals:wEarthquake="0.5"
+    data-signals:wFire="0.35"
+    data-signals:wTemp="0.15"
+    data-signals:pinnedWeights="{ eq: false, fire: false, temp: false }"
+    data-signals:lastPinnedWeight="''"
+    style="display:none"
+  >
+    <!-- Commands and on-events added in Step 7 -->
+  </local-event-script>
+
+  <!-- 4. Timeline — play/pause/speed/wrap -->
+  <local-event-script
+    id="timeline-controller"
+    data-signals:currentHour="0"
+    data-signals:currentDatetime="''"
+    data-signals:playing="false"
+    data-signals:autoPlaySpeed="1"
+    style="display:none"
+  >
+    <!-- Commands and on-events added in Step 7 -->
+  </local-event-script>
+
+  <!-- 5. Presence — sign-in, other-user sync, pin/share -->
+  <local-event-script
+    id="presence-controller"
+    data-signals:userName="''"
+    data-signals:userInitials="''"
+    data-signals:datePinned="false"
+    data-signals:pinnedHour="null"
+    data-signals:otherUsers="[]"
+    style="display:none"
+  >
+    <!-- Commands and on-events added in Step 7 -->
+  </local-event-script>
+
+  <!--
+    ═══════════════════════════════════════════════════════════════════
+    APP SHELL
+    sandwich-layout: header(auto) / main(1fr) / footer(auto), 100dvh
+    ═══════════════════════════════════════════════════════════════════
+  -->
+  <sandwich-layout id="app-shell">
+
+    <!-- ── Header ─────────────────────────────────────────────────── -->
+    <header id="app-header">
+      <cluster-layout justify="space-between" align="center" no-wrap style="height:100%">
+        <a href="/" class="nav-back" aria-label="Back to demos">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          demos
+        </a>
+        <span class="brand" aria-label="LES demo">LES</span>
+        <button
+          id="hamburger-btn"
+          aria-label="Open settings"
+          aria-expanded="false"
+          aria-controls="settings-modal"
+        >
+          <svg width="14" height="12" viewBox="0 0 14 12" fill="none" aria-hidden="true">
+            <line x1="0" y1="1"  x2="14" y2="1"  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="0" y1="6"  x2="14" y2="6"  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="0" y1="11" x2="14" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </cluster-layout>
+    </header>
+
+    <!-- ── Map ────────────────────────────────────────────────────── -->
+    <main>
+      <div id="map-container">
+        <svg id="map" aria-label="Living Map — US geospatial visualization" role="img">
+          <!-- Layer 0: base map (states + borders) -->
+          <g id="layer-base"    class="map-layer"></g>
+          <!-- Layer 1: wind field (triangles, opacity = normalized speed) -->
+          <g id="layer-wind"    class="map-layer"></g>
+          <!-- Layer 2: temperature isobands (blue → yellow oklch) -->
+          <g id="layer-temp"    class="map-layer"></g>
+          <!-- Layer 3: wildfire density (fire oklch, screen blend merges with temp) -->
+          <g id="layer-fire"    class="map-layer" style="mix-blend-mode:screen"></g>
+          <!-- Layer 4: seismic contours (lime oklch) -->
+          <g id="layer-seismic" class="map-layer"></g>
+          <!-- Layer 5: spikes — three sub-groups (earthquake, fire, temp) -->
+          <g id="layer-spikes"  class="map-layer">
+            <g id="spikes-seismic"></g>
+            <g id="spikes-fire"></g>
+            <g id="spikes-temp"></g>
+          </g>
+        </svg>
+        <!-- Layer 6: flights canvas (raster, glow, drawn via rAF) -->
+        <canvas id="flights-canvas" aria-hidden="true"></canvas>
+      </div>
+    </main>
+
+    <!-- ── Footer timeline ────────────────────────────────────────── -->
+    <footer>
+      <div id="timeline-footer">
+        <stacked-layout gap="xs">
+
+          <!-- Scrubber track + presence indicators -->
+          <div class="timeline-track" role="group" aria-label="Timeline scrubber">
+            <div id="presence-indicators" aria-hidden="true"></div>
+            <input
+              id="scrubber"
+              type="range"
+              min="0" max="167" step="1"
+              data-bind:currentHour
+              aria-label="Timeline position (hours)"
+              aria-valuemin="0"
+              aria-valuemax="167"
+            >
+          </div>
+
+          <!-- Controls row -->
+          <div class="timeline-controls">
+
+            <!-- Play / Pause -->
+            <button id="play-pause-btn" class="ctrl-btn" aria-label="Play timeline">
+              <svg id="play-icon" width="10" height="12" viewBox="0 0 10 12" aria-hidden="true">
+                <polygon points="0,0 10,6 0,12" fill="currentColor"/>
+              </svg>
+              <svg id="pause-icon" width="10" height="12" viewBox="0 0 10 12" aria-hidden="true" style="display:none">
+                <rect x="0" y="0" width="3.5" height="12" fill="currentColor" rx="1"/>
+                <rect x="6.5" y="0" width="3.5" height="12" fill="currentColor" rx="1"/>
+              </svg>
+            </button>
+
+            <!-- Speed -->
+            <button class="ctrl-btn" id="speed-btn" aria-label="Playback speed" title="Cycle playback speed">
+              <span class="speed-label" id="speed-display">1×</span>
+            </button>
+
+            <div style="flex:1"></div>
+
+            <!-- Current time -->
+            <time class="time-display" id="time-display" data-text="$currentDatetime">— — — — — —</time>
+
+            <!-- Pin / Share -->
+            <button class="ctrl-btn" id="pin-datetime-btn"
+              aria-label="Share current position with other users"
+              title="Pin and share your current time position">
+              <svg width="12" height="14" viewBox="0 0 12 14" fill="none" aria-hidden="true">
+                <circle cx="6" cy="3" r="2.5" stroke="currentColor" stroke-width="1.2"/>
+                <line x1="6" y1="5.5" x2="6" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                <line x1="3" y1="5.5" x2="9" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+              </svg>
+            </button>
+
+          </div>
+        </stacked-layout>
+      </div>
+    </footer>
+
+  </sandwich-layout>
+
+  <!-- Attribution -->
+  <div id="attribution" aria-label="Data sources">
+    <a href="https://earthquake.usgs.gov" target="_blank" rel="noopener">USGS</a>
+    <a href="https://open-meteo.com"       target="_blank" rel="noopener">Open-Meteo</a>
+    <a href="https://firms.modaps.eosdis.nasa.gov" target="_blank" rel="noopener">NASA FIRMS</a>
+    <a href="https://opensky-network.org"  target="_blank" rel="noopener">OpenSky</a>
+  </div>
+
+  <!--
+    ═══════════════════════════════════════════════════════════════════
+    MODULE SCRIPTS
+    ═══════════════════════════════════════════════════════════════════
+  -->
+  <script type="module">
+    // ── @the-design-system/layout — individual element registration ───
+    import { define as defineStacked }
+      from 'https://cdn.jsdelivr.net/npm/@the-design-system/layout@0.2.0/dist/stacked/stacked.js'
+    import { define as defineCluster }
+      from 'https://cdn.jsdelivr.net/npm/@the-design-system/layout@0.2.0/dist/cluster/cluster.js'
+    import { define as defineSandwich }
+      from 'https://cdn.jsdelivr.net/npm/@the-design-system/layout@0.2.0/dist/sandwich/sandwich.js'
+
+    defineStacked()
+    defineCluster()
+    defineSandwich()
+
+    // ── D3 v7 (resolves to latest v7.x on jsDelivr) ────────────────────
+    import * as d3 from 'd3'
+    window.d3 = d3
+    console.log('[d3] D3 loaded:', d3.version)
+
+    // ── Sign-in ────────────────────────────────────────────────────────
+    const input  = document.getElementById('signin-input')
+    const submit = document.getElementById('signin-submit')
+
+    input.addEventListener('input', () => {
+      submit.disabled = input.value.trim().length < 2
+    })
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !submit.disabled) submit.click()
+    })
+
+    submit.addEventListener('click', () => {
+      const name = input.value.trim()
+      if (name.length < 2) return
+      document.getElementById('signin-overlay').classList.add('is-submitted')
+      document.getElementById('splash-loading').classList.add('is-visible')
+      // Full handler (presence sync, YouTube unlock, data fetches) added in Step 7
+      console.log('[d3] signed in as:', name)
+    })
+
+    // ── Hamburger / modal (stub — full View Transition in Step 10) ────
+    function openModal() {
+      const modal = document.getElementById('settings-modal')
+      const bd    = document.getElementById('modal-backdrop')
+      modal.classList.add('is-open')
+      modal.setAttribute('aria-hidden', 'false')
+      bd.classList.add('is-open')
+      document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'true')
+    }
+
+    function closeModal() {
+      const modal = document.getElementById('settings-modal')
+      const bd    = document.getElementById('modal-backdrop')
+      modal.classList.remove('is-open')
+      modal.setAttribute('aria-hidden', 'true')
+      bd.classList.remove('is-open')
+      document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'false')
+    }
+
+    document.getElementById('hamburger-btn').addEventListener('click', openModal)
+    document.getElementById('modal-close-btn').addEventListener('click', closeModal)
+    document.getElementById('modal-backdrop').addEventListener('click', closeModal)
+
+    // ── Worker count slider ────────────────────────────────────────────
+    const workerSlider = document.getElementById('worker-slider')
+    const workerValue  = document.getElementById('worker-value')
+    const defaultWorkers = Math.min(8, Math.max(2, (navigator.hardwareConcurrency || 4) - 1))
+    workerSlider.value = defaultWorkers
+    workerValue.textContent = defaultWorkers
+    workerSlider.addEventListener('input', () => {
+      workerValue.textContent = workerSlider.value
+    })
+
+    // ── Weight slider live display (full pin logic in Step 9) ─────────
+    for (const [id, vid] of [['w-eq','wv-eq'],['w-fire','wv-fire'],['w-temp','wv-temp']]) {
+      document.getElementById(id).addEventListener('input', () => {
+        document.getElementById(vid).textContent =
+          parseFloat(document.getElementById(id).value).toFixed(2)
+      })
+    }
+
+    console.log('[d3] Step 2 shell — D3:', d3.version, '/ Turf:', window.turf?.version || '7.3.4')
+  </script>
+
+</body>
+</html>
