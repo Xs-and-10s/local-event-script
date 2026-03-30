@@ -4,28 +4,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Earthquakes, Wind &amp; Fire — LES</title>
-  <meta name="description" content="Geospatial choreography: D3 + Datastar + LES over a live US map. Earthquakes, wind vectors, wildfire heatmaps, and seismic contours.">
+  <meta name="description" content="Geospatial choreography: D3 + Datastar + LES over a live US map.">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="preconnect" href="https://www.youtube.com">
 
-  <!-- @the-design-system/layout v0.2.0 — design tokens (must be first) -->
+  <!-- @the-design-system/layout v0.2.0 core tokens -->
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/@the-design-system/layout@0.2.0/dist/core.min.css"
   >
 
-  <!--
-    Importmap — all module imports resolved by name.
-    d3@7 resolves to the latest v7 on jsDelivr (currently 7.9.0 once cached,
-    or the highest cached 7.x). Using the major-only pin avoids the 404 that
-    hit a specific patch version before jsDelivr pre-caches it.
-  -->
+  <!-- Datastar importmap -->
   <script type="importmap">
     {
       "imports": {
-        "datastar": "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js",
-        "d3":       "https://cdn.jsdelivr.net/npm/d3@7/+esm"
+        "datastar":  "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js",
+        "d3":        "https://cdn.jsdelivr.net/npm/d3@7/+esm",
+        "topojson":  "https://cdn.jsdelivr.net/npm/topojson-client@3/+esm"
       }
     }
   </script>
@@ -37,40 +33,40 @@
   <script type="module" src="/dist/local-event-script.js"></script>
 
   <style>
-    /* ── Design tokens — lime-green dark theme ──────────────────────── */
+    /* ── OKLCH design tokens — lime-green dark theme ────────────────── */
     :root {
-      /* Backgrounds: very slightly green-tinted dark */
-      --bg:           #08100a;
-      --surface:      #101a12;
-      --surface-2:    #172019;
-      --border:       #1f3022;
-      --text:         #d0e8d4;
-      --muted:        #5a7862;
+      /* Base surfaces */
+      --bg:          #080c0a;   /* near-black, faint green tinge */
+      --surface:     #0e1410;
+      --surface-2:   #141d16;
+      --border:      #1c2b1f;
+      --text:        #d4e8d8;
+      --muted:       #4d6b52;
 
-      /* Accent: electric lime (matches earthquake/seismic palette) */
-      --accent:       oklch(0.78 0.20 135);
-      --accent-dim:   oklch(0.60 0.16 135);
-      --accent-glow:  oklch(0.87 0.23 135 / 0.15);
+      /* Lime accent (replaces purple) */
+      --accent:        oklch(0.78 0.20 135);   /* lime-green UI accent */
+      --accent-dim:    oklch(0.55 0.14 135);
+      --accent-glow:   oklch(0.87 0.23 135);   /* used for bright highlights */
+      --accent-subtle: color-mix(in oklch, oklch(0.78 0.20 135) 12%, transparent);
 
       /* Layer palette — OKLCH */
-      --lime-bright:  oklch(0.87 0.23 135);   /* earthquake spikes & seismic isobands */
-      --lime-dim:     oklch(0.65 0.18 135);
-      --fire-hot:     oklch(0.72 0.22 35);    /* wildfire — red-orange */
-      --fire-warm:    oklch(0.82 0.20 60);    /* wildfire — amber */
-      --temp-cool:    oklch(0.55 0.14 240);   /* temperature — blue */
-      --temp-warm:    oklch(0.85 0.18 85);    /* temperature — yellow */
-      --wind-arrow:   oklch(0.90 0.06 210);   /* wind triangles — cyan-white */
+      --lime-bright: oklch(0.87 0.23 135);  /* earthquake spikes + seismic isobands */
+      --lime-dim:    oklch(0.65 0.18 135);
+      --fire-hot:    oklch(0.72 0.22 35);   /* wildfire — red-orange */
+      --fire-warm:   oklch(0.82 0.20 60);   /* wildfire — amber */
+      --temp-cool:   oklch(0.55 0.14 240);  /* temperature — blue */
+      --temp-warm:   oklch(0.85 0.18 85);   /* temperature — yellow */
+      --wind-arrow:  oklch(0.90 0.06 210);  /* wind triangles — cyan-white */
 
-      /* UI sizing */
+      /* UI geometry */
       --header-h:     52px;
       --footer-h:     88px;
       --modal-radius: 16px;
-      --glass-bg:     color-mix(in oklch, var(--surface) 78%, transparent);
+      --glass-bg:     color-mix(in oklch, var(--surface) 80%, transparent);
       --glass-blur:   20px;
-      --glass-border: color-mix(in oklch, var(--border) 70%, transparent);
+      --glass-border: color-mix(in oklch, oklch(0.78 0.20 135) 20%, var(--border));
     }
 
-    /* ── Reset ──────────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; }
 
     html, body {
@@ -82,384 +78,280 @@
       height: 100%;
     }
 
-    /* ── sandwich-layout shell ──────────────────────────────────────── */
-    sandwich-layout {
-      width: 100%;
-    }
+    /* ── sandwich-layout: header / main / footer ────────────────────── */
+    sandwich-layout { width: 100%; }
 
     /* ── Header ─────────────────────────────────────────────────────── */
     #app-header {
       height: var(--header-h);
       padding: 0 1rem;
       border-bottom: 1px solid var(--border);
-      background: color-mix(in oklch, var(--surface) 92%, transparent);
+      background: color-mix(in oklch, var(--surface) 90%, transparent);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
       position: relative;
       z-index: 10;
     }
+    /* Header uses CSS Grid: left=back-link, center=brand, right=hamburger.
+       The 1fr/auto/1fr pattern keeps the brand truly centered regardless
+       of the asymmetric widths of the two end items. */
+    #app-header-inner {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      height: 100%;
+      padding: 0 1rem;
+    }
 
-    #app-header cluster-layout { height: 100%; }
+    #app-header-inner .nav-back { justify-self: start; }
+    #app-header-inner .brand   { justify-self: center; }
+    #app-header-inner .nav-right { justify-self: end; }
 
     .nav-back {
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 0.8rem;
-      display: flex;
-      align-items: center;
-      gap: 0.25rem;
+      color: var(--muted); text-decoration: none;
+      font-size: 0.8rem; display: flex; align-items: center; gap: 0.25rem;
       transition: color 0.15s;
     }
     .nav-back:hover { color: var(--text); }
 
     .brand {
-      font-size: 0.85rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      font-variant: small-caps;
-      color: var(--accent);
+      font-size: 0.85rem; font-weight: 700;
+      letter-spacing: 0.12em; font-variant: small-caps;
+      color: var(--accent-glow);
     }
 
     #hamburger-btn {
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text);
-      cursor: pointer;
+      background: none; border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); cursor: pointer;
       width: 36px; height: 36px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+      display: flex; align-items: center; justify-content: center;
+      transition: border-color 0.15s, background 0.15s;
       view-transition-name: settings-trigger;
     }
     #hamburger-btn:hover {
       border-color: var(--accent);
-      background: var(--accent-glow);
-      box-shadow: 0 0 8px var(--accent-glow);
+      background: var(--accent-subtle);
     }
-    #hamburger-btn svg { pointer-events: none; }
 
     /* ── Map container ──────────────────────────────────────────────── */
+    /* <main> is a 1fr grid item in sandwich-layout. To allow
+       #map-container { height:100% } to resolve, <main> must itself
+       carry a definite height. Setting height:100% + min-height:0
+       on the grid item propagates the track size downward. */
+    sandwich-layout > main {
+      height: 100%;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 1fr;
+    }
+
     #map-container {
       position: relative;
-      width: 100%; height: 100%;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
       overflow: hidden;
       background: var(--bg);
     }
 
     #map {
-      position: absolute;
-      inset: 0;
-      width: 100%; height: 100%;
-      opacity: 0;
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      opacity: 0; /* LES fades in */
+    }
+    .map-layer { opacity: 0; }
+
+    /* ── Map path styles ────────────────────────────────────────────── */
+    /* State fills — subtle hover highlight for future interactivity */
+    #layer-base path.state {
+      transition: fill 0.2s;
+    }
+    #layer-base path.state:hover {
+      fill: color-mix(in oklch, var(--map-state-fill) 70%, var(--accent) 30%);
+    }
+
+    /* Border paths are non-interactive */
+    #layer-base path.state-borders,
+    #layer-base path.nation-outline,
+    #layer-base path.sphere-bg {
+      pointer-events: none;
     }
 
     #flights-canvas {
-      position: absolute;
-      inset: 0;
-      width: 100%; height: 100%;
-      pointer-events: none;
-      opacity: 0;
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      pointer-events: none; opacity: 0;
     }
 
-    .map-layer { opacity: 0; }
-
-    /* ── Footer ─────────────────────────────────────────────────────── */
+    /* ── Footer timeline ─────────────────────────────────────────────── */
     #timeline-footer {
-      position: relative;
-      z-index: 10;
+      position: relative; z-index: 10;
       background: var(--glass-bg);
       backdrop-filter: blur(var(--glass-blur));
       -webkit-backdrop-filter: blur(var(--glass-blur));
       border-top: 1px solid var(--glass-border);
       padding: 0.75rem 1rem;
-      opacity: 0;
+      opacity: 0; /* LES fades in last */
     }
 
-    .timeline-track {
-      position: relative;
-      width: 100%;
-    }
+    .timeline-track { position: relative; width: 100%; }
 
     #scrubber {
-      width: 100%;
-      height: 4px;
+      width: 100%; height: 4px;
       accent-color: var(--accent);
-      cursor: pointer;
-      margin: 0;
+      cursor: pointer; margin: 0;
     }
 
     #presence-indicators {
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
+      position: absolute; inset: 0; pointer-events: none;
     }
 
     .presence-triangle {
-      position: absolute;
-      top: 0;
-      transform: translateX(-50%);
+      position: absolute; top: 0; transform: translateX(-50%);
       width: 0; height: 0;
-      border-left: 5px solid transparent;
-      border-right: 5px solid transparent;
+      border-left: 5px solid transparent; border-right: 5px solid transparent;
       border-top: 8px solid currentColor;
       transition: left 0.3s ease;
     }
-
     .presence-badge {
-      position: absolute;
-      top: 10px;
-      transform: translateX(-50%);
-      width: 20px; height: 20px;
-      border-radius: 50%;
-      border: 2px solid currentColor;
-      background: transparent;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.5rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: inherit;
+      position: absolute; top: 10px; transform: translateX(-50%);
+      width: 20px; height: 20px; border-radius: 50%;
+      border: 2px solid currentColor; background: transparent;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.5rem; font-weight: 700; color: inherit;
     }
-
-    .presence-badge.is-pinned {
-      animation: badge-pulse 2s ease-in-out infinite;
-    }
-
+    .presence-badge.is-pinned { animation: badge-pulse 2s ease-in-out infinite; }
     @keyframes badge-pulse {
-      0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, currentColor 50%, transparent); transform: translateX(-50%) scale(1); }
-      50%       { box-shadow: 0 0 0 4px color-mix(in oklch, currentColor 20%, transparent); transform: translateX(-50%) scale(1.25); }
+      0%,100% { box-shadow: 0 0 0 0 color-mix(in oklch, currentColor 50%, transparent); transform: translateX(-50%) scale(1); }
+      50%      { box-shadow: 0 0 0 4px color-mix(in oklch, currentColor 20%, transparent); transform: translateX(-50%) scale(1.25); }
     }
 
     .timeline-controls {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-top: 0.5rem;
+      display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;
     }
 
     .ctrl-btn {
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text);
-      cursor: pointer;
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); cursor: pointer;
       width: 32px; height: 32px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
-      padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; transition: border-color 0.15s, background 0.15s; padding: 0;
     }
-    .ctrl-btn:hover {
-      border-color: var(--accent);
-      background: var(--accent-glow);
-      box-shadow: 0 0 6px var(--accent-glow);
-    }
+    .ctrl-btn:hover { border-color: var(--accent); background: var(--accent-subtle); }
     .ctrl-btn.is-active { border-color: var(--accent); color: var(--accent); }
 
     .time-display {
-      font-family: monospace;
-      font-size: 0.75rem;
-      color: var(--muted);
-      white-space: nowrap;
-      margin-left: auto;
+      font-family: monospace; font-size: 0.75rem;
+      color: var(--muted); white-space: nowrap; margin-left: auto;
     }
-
-    .speed-label {
-      font-size: 0.7rem;
-      color: var(--muted);
-      white-space: nowrap;
-    }
+    .speed-label { font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
 
     .pin-btn {
-      background: none;
-      border: none;
-      cursor: pointer;
-      color: var(--muted);
-      padding: 0.1rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); padding: 0.1rem;
+      display: flex; align-items: center; justify-content: center;
       transition: color 0.15s;
     }
     .pin-btn:hover { color: var(--text); }
     .pin-btn.is-pinned { color: var(--accent); }
     .pin-btn.is-system-pinned { color: var(--muted); opacity: 0.6; }
 
-    /* ── Splash ─────────────────────────────────────────────────────── */
+    /* ── Splash ──────────────────────────────────────────────────────── */
     #splash {
-      position: fixed;
-      inset: 0;
-      z-index: 200;
+      position: fixed; inset: 0; z-index: 200;
       background: var(--bg);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 1.5rem;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2rem;
     }
+    #splash.is-exiting { pointer-events: none; }
 
     .splash-title {
-      font-size: clamp(1.6rem, 5vw, 2.4rem);
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: var(--text);
-      text-align: center;
-      /* Subtle lime glow on title */
-      text-shadow: 0 0 40px oklch(0.87 0.23 135 / 0.3);
+      font-size: clamp(1.4rem, 4vw, 2rem); font-weight: 700;
+      letter-spacing: -0.02em; color: var(--text); text-align: center;
+    }
+    /* Lime accent underline on title */
+    .splash-title::after {
+      content: ''; display: block; margin: 0.4rem auto 0;
+      width: 48px; height: 2px;
+      background: var(--accent-glow);
+      border-radius: 1px;
     }
 
     .splash-subtitle {
-      font-size: 0.875rem;
-      color: var(--muted);
-      text-align: center;
-      max-width: 360px;
-      line-height: 1.65;
-    }
-
-    .splash-subtitle strong {
-      color: var(--accent);
-      font-weight: 600;
+      font-size: 0.85rem; color: var(--muted); text-align: center;
+      max-width: 340px; line-height: 1.6;
     }
 
     /* ── Sign-in ─────────────────────────────────────────────────────── */
     #signin-overlay {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 1rem;
-      width: 100%;
-      max-width: 320px;
-    }
-
-    #signin-overlay.is-submitted {
-      opacity: 0;
-      pointer-events: none;
+      display: flex; flex-direction: column; align-items: center; gap: 1.25rem;
+      width: 100%; max-width: 320px;
       transition: opacity 0.3s ease;
     }
+    #signin-overlay.is-submitted { opacity: 0; pointer-events: none; }
 
-    .signin-label {
-      font-size: 1rem;
-      font-weight: 600;
-      color: var(--text);
-    }
-
-    .signin-hint {
-      font-size: 0.78rem;
-      color: var(--muted);
-      text-align: center;
-      line-height: 1.5;
-    }
+    .signin-label { font-size: 1rem; font-weight: 500; color: var(--text); }
+    .signin-hint { font-size: 0.78rem; color: var(--muted); text-align: center; }
 
     #signin-input {
       width: 100%;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 0.75rem 1rem;
-      color: var(--text);
-      font-size: 1rem;
-      font-family: inherit;
-      outline: none;
-      text-align: center;
-      transition: border-color 0.15s, box-shadow 0.15s;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 0.75rem 1rem; color: var(--text);
+      font-size: 1rem; font-family: inherit; outline: none; text-align: center;
+      transition: border-color 0.15s;
     }
-    #signin-input:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-glow);
-    }
+    #signin-input:focus { border-color: var(--accent); }
     #signin-input::placeholder { color: var(--muted); }
 
     #signin-submit {
       width: 100%;
-      background: var(--accent);
-      border: none;
-      border-radius: 10px;
-      color: #030f05;          /* dark text on lime */
-      font-size: 0.9rem;
-      font-weight: 700;
-      padding: 0.75rem;
-      cursor: pointer;
-      font-family: inherit;
-      transition: opacity 0.15s, box-shadow 0.15s;
+      background: var(--accent); border: none; border-radius: 10px;
+      color: var(--bg); font-size: 0.9rem; font-weight: 700;
+      padding: 0.75rem; cursor: pointer; font-family: inherit;
+      transition: opacity 0.15s, filter 0.15s;
     }
-    #signin-submit:hover {
-      opacity: 0.9;
-      box-shadow: 0 0 16px oklch(0.87 0.23 135 / 0.4);
-    }
-    #signin-submit:disabled { opacity: 0.3; cursor: not-allowed; box-shadow: none; }
+    #signin-submit:hover:not(:disabled) { filter: brightness(1.1); }
+    #signin-submit:disabled { opacity: 0.35; cursor: not-allowed; }
 
     /* ── Loading state ───────────────────────────────────────────────── */
     #splash-loading {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 0.75rem;
-      opacity: 0;
-      transition: opacity 0.3s ease 0.2s;
+      display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
+      opacity: 0; transition: opacity 0.3s ease 0.2s;
     }
     #splash-loading.is-visible { opacity: 1; }
 
-    .loading-dots {
-      display: flex;
-      gap: 0.4rem;
-    }
+    .loading-dots { display: flex; gap: 0.4rem; }
     .loading-dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
+      width: 6px; height: 6px; border-radius: 50%;
       background: var(--accent);
       animation: dot-bounce 1.2s ease-in-out infinite;
     }
     .loading-dot:nth-child(2) { animation-delay: 0.2s; }
     .loading-dot:nth-child(3) { animation-delay: 0.4s; }
-
     @keyframes dot-bounce {
-      0%, 80%, 100% { transform: scale(0.8); opacity: 0.35; }
-      40%            { transform: scale(1.2); opacity: 1; }
+      0%,80%,100% { transform: scale(0.8); opacity: 0.4; }
+      40%          { transform: scale(1.2); opacity: 1; }
     }
 
-    .loading-status {
-      font-size: 0.78rem;
-      color: var(--muted);
-      font-family: monospace;
-    }
-
-    .loading-items {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.3rem;
-    }
-
+    .loading-status { font-size: 0.78rem; color: var(--muted); font-family: monospace; }
+    .loading-items { display: flex; flex-direction: column; align-items: flex-start; gap: 0.3rem; }
     .loading-item {
-      font-size: 0.72rem;
-      color: var(--muted);
-      font-family: monospace;
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
+      font-size: 0.72rem; color: var(--muted); font-family: monospace;
+      display: flex; align-items: center; gap: 0.4rem;
     }
     .loading-item::before { content: '○'; color: var(--border); }
-    .loading-item.is-done::before { content: '●'; color: var(--lime-bright); }
+    .loading-item.is-done::before { content: '●'; color: var(--accent-glow); }
 
-    /* ── Settings modal ──────────────────────────────────────────────── */
+    /* ── Settings modal ───────────────────────────────────────────────── */
     #settings-modal {
       position: fixed;
       inset: 0;
       z-index: 150;
-      display: flex;
-      align-items: flex-start;
-      justify-content: flex-end;
-      padding: 0.5rem;
-      pointer-events: none;
+      display: grid;
+      place-items: center;   /* centers .modal-panel in the viewport */
       opacity: 0;
+      pointer-events: none;
       view-transition-name: settings-panel;
+      transition: opacity 0.2s ease;
     }
-
     #settings-modal.is-open {
       pointer-events: auto;
       opacity: 1;
@@ -472,158 +364,68 @@
       border: 1px solid var(--glass-border);
       border-radius: var(--modal-radius);
       padding: 1.25rem;
-      width: min(360px, calc(100vw - 1rem));
-      max-height: calc(100dvh - 1rem);
+      width: min(400px, calc(100vw - 2rem));
+      max-height: calc(100dvh - 2rem);
       overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-      box-shadow: 0 8px 32px color-mix(in oklch, #000 50%, transparent),
-                  0 0 0 1px oklch(0.87 0.23 135 / 0.05);
+      display: flex; flex-direction: column; gap: 1.25rem;
+      box-shadow: 0 8px 32px color-mix(in oklch, #000 40%, transparent),
+                  0 0 0 1px color-mix(in oklch, var(--accent) 8%, transparent);
     }
 
-    .modal-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
+    .modal-header { display: flex; align-items: center; justify-content: space-between; }
     .modal-title {
-      font-size: 0.8rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--muted);
+      font-size: 0.8rem; font-weight: 700; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--accent);
     }
 
     #modal-close-btn {
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--muted);
-      cursor: pointer;
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      color: var(--muted); cursor: pointer;
       width: 28px; height: 28px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: flex; align-items: center; justify-content: center;
       transition: border-color 0.15s, color 0.15s;
     }
-    #modal-close-btn:hover { border-color: var(--accent); color: var(--accent); }
+    #modal-close-btn:hover { border-color: var(--text); color: var(--text); }
 
-    .modal-section {
-      display: flex;
-      flex-direction: column;
-      gap: 0.6rem;
-    }
-
+    .modal-section { display: flex; flex-direction: column; gap: 0.6rem; }
     .modal-section-label {
-      font-size: 0.68rem;
-      font-weight: 600;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--accent-dim);
-      padding-bottom: 0.25rem;
-      border-bottom: 1px solid var(--border);
+      font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--accent-dim);
+      padding-bottom: 0.25rem; border-bottom: 1px solid var(--border);
     }
 
-    .layer-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.5rem;
-    }
-
-    .layer-label {
-      font-size: 0.82rem;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-    }
-
-    .layer-swatch {
-      width: 10px; height: 10px;
-      border-radius: 2px;
-      flex-shrink: 0;
-    }
+    .layer-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+    .layer-label { font-size: 0.82rem; color: var(--text); display: flex; align-items: center; gap: 0.4rem; }
+    .layer-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 
     .toggle-switch {
-      width: 36px; height: 20px;
-      background: var(--border);
-      border-radius: 10px;
-      position: relative;
-      cursor: pointer;
-      border: none;
-      flex-shrink: 0;
+      width: 36px; height: 20px; background: var(--border);
+      border-radius: 10px; position: relative; cursor: pointer; border: none; flex-shrink: 0;
       transition: background 0.2s;
     }
     .toggle-switch.is-on { background: var(--accent); }
     .toggle-switch::after {
-      content: '';
-      position: absolute;
-      width: 14px; height: 14px;
-      border-radius: 50%;
-      background: white;
-      top: 3px; left: 3px;
+      content: ''; position: absolute;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: white; top: 3px; left: 3px;
       transition: transform 0.2s;
     }
     .toggle-switch.is-on::after { transform: translateX(16px); }
 
-    .weight-row {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .weight-label {
-      font-size: 0.78rem;
-      color: var(--text);
-      width: 80px;
-      flex-shrink: 0;
-    }
-
-    .weight-slider {
-      flex: 1;
-      height: 4px;
-      accent-color: var(--accent);
-      cursor: pointer;
-    }
+    .weight-row { display: flex; align-items: center; gap: 0.5rem; }
+    .weight-label { font-size: 0.78rem; color: var(--text); width: 80px; flex-shrink: 0; }
+    .weight-slider { flex: 1; height: 4px; accent-color: var(--accent); cursor: pointer; }
     .weight-slider:disabled { opacity: 0.4; cursor: not-allowed; }
+    .weight-value { font-family: monospace; font-size: 0.72rem; color: var(--muted); width: 32px; text-align: right; flex-shrink: 0; }
 
-    .weight-value {
-      font-family: monospace;
-      font-size: 0.72rem;
-      color: var(--muted);
-      width: 32px;
-      text-align: right;
-      flex-shrink: 0;
-    }
-
-    .worker-row {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-
+    .worker-row { display: flex; align-items: center; gap: 0.75rem; }
     .worker-label { font-size: 0.82rem; color: var(--text); flex: 1; }
+    .worker-value { font-family: monospace; font-size: 0.82rem; color: var(--accent); width: 24px; text-align: center; }
 
-    .worker-value {
-      font-family: monospace;
-      font-size: 0.82rem;
-      color: var(--accent);
-      width: 24px;
-      text-align: center;
-    }
-
-    .audio-controls {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
+    .audio-controls { display: flex; align-items: center; gap: 0.5rem; }
     .audio-label { font-size: 0.72rem; color: var(--muted); flex: 1; }
 
-    /* ── View Transitions ────────────────────────────────────────────── */
+    /* ── View Transitions — hamburger ↔ modal ───────────────────────── */
     @supports (view-transition-name: none) {
       ::view-transition-old(settings-trigger),
       ::view-transition-new(settings-trigger),
@@ -634,67 +436,43 @@
       }
     }
 
-    /* ── Modal backdrop ──────────────────────────────────────────────── */
     #modal-backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 140;
-      background: color-mix(in oklch, #000 50%, transparent);
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.25s;
+      position: fixed; inset: 0; z-index: 140;
+      background: color-mix(in oklch, #000 40%, transparent);
+      opacity: 0; pointer-events: none; transition: opacity 0.25s;
     }
     #modal-backdrop.is-open { opacity: 1; pointer-events: auto; }
 
     /* ── Attribution ─────────────────────────────────────────────────── */
     #attribution {
-      position: fixed;
-      bottom: calc(var(--footer-h) + 4px);
-      right: 0.5rem;
-      z-index: 5;
-      font-size: 0.6rem;
-      color: color-mix(in oklch, var(--muted) 55%, transparent);
-      display: flex;
-      gap: 0.5rem;
-      pointer-events: none;
+      position: fixed; bottom: calc(var(--footer-h) + 4px); right: 0.5rem;
+      z-index: 5; font-size: 0.6rem;
+      color: color-mix(in oklch, var(--muted) 60%, transparent);
+      display: flex; gap: 0.5rem; pointer-events: none;
     }
-    #attribution a {
-      color: inherit;
-      text-decoration: none;
-      pointer-events: auto;
-    }
+    #attribution a { color: inherit; text-decoration: none; pointer-events: auto; }
     #attribution a:hover { color: var(--muted); }
 
     /* ── Responsive ──────────────────────────────────────────────────── */
     @media (max-width: 600px) {
       :root { --footer-h: 110px; }
-
+      /* Sheet slides up from bottom on mobile */
+      #settings-modal {
+        align-items: end;
+        padding: 0;
+      }
       .modal-panel {
         width: 100%;
         border-radius: var(--modal-radius) var(--modal-radius) 0 0;
-        position: fixed;
-        bottom: 0; left: 0;
         max-height: 80dvh;
       }
-
-      #settings-modal {
-        align-items: flex-end;
-        justify-content: stretch;
-        padding: 0;
-      }
-
       .timeline-controls { flex-wrap: wrap; gap: 0.4rem; }
     }
   </style>
 </head>
 <body>
 
-  <!--
-    ═══════════════════════════════════════════════════════════════════
-    YOUTUBE IFRAME — permanently offscreen
-    Audio starts after the sign-in user gesture (browser autoplay policy).
-    ═══════════════════════════════════════════════════════════════════
-  -->
+  <!-- ── YouTube iframe — permanently offscreen ────────────────────── -->
   <iframe
     id="yt-player"
     src="https://www.youtube.com/embed/Gs069dndIYk?enablejsapi=1&autoplay=0&controls=0&loop=0&mute=0"
@@ -708,19 +486,83 @@
 
   <!--
     ═══════════════════════════════════════════════════════════════════
-    SPLASH
+    LES CONTROLLERS — all siblings at body level
+    Fix [3]: LES instances must NOT be nested inside each other.
+    Each is a pure event-sourcing controller. Their HTML targets
+    are addressed by ID from the regular DOM below.
+    Commands and event handlers will be populated in Steps 7–9.
+    ═══════════════════════════════════════════════════════════════════
+  -->
+
+  <!-- Worker pool event bus — no HTML children -->
+  <local-event-script
+    id="worker-controller"
+    data-signals:workerCount="4"
+  ></local-event-script>
+
+  <!-- Page-level load sequence and splash exit -->
+  <local-event-script
+    id="page-controller"
+    data-signals:dataState="'loading'"
+    data-signals:earthquakesReady="false"
+    data-signals:weatherReady="false"
+    data-signals:firesReady="false"
+    data-signals:settingsOpen="false"
+    data-signals:audioPlaying="false"
+    data-signals:audioMuted="false"
+  ></local-event-script>
+
+  <!-- Map animation: camera pan, screen shake, layer transitions -->
+  <local-event-script
+    id="map-controller"
+    data-signals:strongestPOI="null"
+    data-signals:shakeIntensity="0"
+    data-signals:flightsEnabled="false"
+    data-signals:wEarthquake="0.5"
+    data-signals:wFire="0.35"
+    data-signals:wTemp="0.15"
+    data-signals:pinnedWeights="{ eq: false, fire: false, temp: false }"
+    data-signals:lastPinnedWeight="''"
+  ></local-event-script>
+
+  <!-- Timeline: play/pause, autoplay, wrap-around -->
+  <local-event-script
+    id="timeline-controller"
+    data-signals:currentHour="0"
+    data-signals:currentDatetime="''"
+    data-signals:playing="false"
+    data-signals:autoPlaySpeed="1"
+  ></local-event-script>
+
+  <!-- Presence: sign-in, timeline presence sync -->
+  <local-event-script
+    id="presence-controller"
+    data-signals:userName="''"
+    data-signals:userInitials="''"
+    data-signals:datePinned="false"
+    data-signals:pinnedHour="null"
+    data-signals:otherUsers="[]"
+  ></local-event-script>
+
+  <!--
+    ═══════════════════════════════════════════════════════════════════
+    SPLASH SCREEN
     ═══════════════════════════════════════════════════════════════════
   -->
   <div id="splash" role="dialog" aria-modal="true" aria-label="Welcome to Living Map">
+
     <p class="splash-title">Living Map</p>
     <p class="splash-subtitle">
-      <strong>Earthquakes · Wind · Wildfires</strong><br>
-      Real-time geospatial choreography — <strong>D3</strong>, <strong>Datastar</strong>, and <strong>LES</strong>.
+      Earthquakes · Wind · Wildfires<br>
+      D3 · Datastar · LES
     </p>
 
-    <div id="signin-overlay" role="form" aria-label="Identify yourself">
+    <div id="signin-overlay" role="form" aria-label="Sign in to join the session">
       <label class="signin-label" for="signin-input">Who are you?</label>
-      <p class="signin-hint">Just a name — no account, no password.<br>You'll appear on the shared timeline.</p>
+      <p class="signin-hint">
+        Just a name — no account, no password.<br>
+        You'll appear on the shared timeline.
+      </p>
       <input
         id="signin-input"
         type="text"
@@ -730,10 +572,12 @@
         spellcheck="false"
         aria-required="true"
       >
-      <button id="signin-submit" type="button" disabled>Enter the map →</button>
+      <button id="signin-submit" type="button" disabled>
+        Enter the map →
+      </button>
     </div>
 
-    <div id="splash-loading" aria-live="polite">
+    <div id="splash-loading" aria-live="polite" aria-label="Loading data">
       <div class="loading-dots" aria-hidden="true">
         <div class="loading-dot"></div>
         <div class="loading-dot"></div>
@@ -744,9 +588,10 @@
         <div class="loading-item" id="li-earthquakes" role="listitem">Earthquake feed (USGS)</div>
         <div class="loading-item" id="li-weather"     role="listitem">Wind &amp; temperature (Open-Meteo)</div>
         <div class="loading-item" id="li-fires"       role="listitem">Wildfire hotspots (NASA FIRMS)</div>
-        <div class="loading-item" id="li-analysis"    role="listitem">Spatial analysis (Turf.js)</div>
+        <div class="loading-item" id="li-analysis"    role="listitem">Spatial analysis (Turf)</div>
       </div>
     </div>
+
   </div>
 
   <!-- Modal backdrop -->
@@ -757,7 +602,13 @@
     SETTINGS MODAL
     ═══════════════════════════════════════════════════════════════════
   -->
-  <div id="settings-modal" role="dialog" aria-modal="true" aria-label="Map settings" aria-hidden="true">
+  <div
+    id="settings-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Map settings"
+    aria-hidden="true"
+  >
     <div class="modal-panel">
 
       <div class="modal-header">
@@ -794,20 +645,18 @@
         </div>
         <div class="layer-row">
           <span class="layer-label">
-            <span class="layer-swatch" style="background:#88aaff"></span>
-            Flights
+            <span class="layer-swatch" style="background:#88aaff"></span>Flights
             <span style="font-size:0.65rem;color:var(--muted)">(needs OpenSky key)</span>
           </span>
           <button class="toggle-switch" data-layer="flights" aria-label="Toggle flight layer" aria-pressed="false"></button>
         </div>
       </div>
 
-      <!-- POI weights -->
+      <!-- POI focus weights -->
       <div class="modal-section">
         <p class="modal-section-label">Camera focus weights</p>
         <p style="font-size:0.72rem;color:var(--muted);margin:0 0 0.5rem">
-          Controls which phenomena the camera pans toward. Must sum to 1.0.
-          Pin two sliders to move only the third.
+          Must sum to 1.0. Pin two sliders to move only the third.
         </p>
         <div class="weight-row">
           <span class="weight-label">Earthquake</span>
@@ -853,12 +702,12 @@
         <div class="worker-row">
           <span class="worker-label">Web Workers</span>
           <input type="range" min="2" max="8" step="1" id="worker-slider"
-            style="flex:1;height:4px;accent-color:var(--accent);cursor:pointer"
-            aria-label="Number of web workers">
+                 style="flex:1;height:4px;accent-color:var(--accent);cursor:pointer"
+                 aria-label="Number of web workers">
           <span class="worker-value" id="worker-value">4</span>
         </div>
         <p style="font-size:0.68rem;color:var(--muted);margin:0.25rem 0 0">
-          More workers = smoother spatial analysis on multi-core devices.
+          Reduce if the page feels sluggish on low-powered devices.
         </p>
       </div>
 
@@ -875,7 +724,7 @@
               <rect x="7" y="1" width="4" height="12" fill="currentColor" rx="1"/>
             </svg>
           </button>
-          <button class="ctrl-btn" id="audio-restart-btn" aria-label="Restart audio from beginning">
+          <button class="ctrl-btn" id="audio-restart-btn" aria-label="Restart audio">
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
               <path d="M2 6.5A4.5 4.5 0 1 1 6.5 11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
               <polyline points="0,4 2,6.5 4.5,4.5" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
@@ -902,100 +751,16 @@
 
   <!--
     ═══════════════════════════════════════════════════════════════════
-    LES FEDERATION — all five instances as body-level siblings.
-
-    KEY DESIGN RULE: LES elements must NOT be nested inside each other.
-    The LES reader scans direct children for known LES elements
-    (on-event, local-command, on-signal, on-load, on-enter, on-exit,
-    use-module) and will warn about any unknown custom element child,
-    including another <local-event-script>.
-
-    Each instance is purely a control structure — no visual children.
-    Visual DOM lives in the sandwich-layout below.
-    Inter-instance communication happens via `broadcast` (dispatches
-    on document) which all instances can hear via on-event listeners.
-
-    display:none keeps them out of layout entirely while still letting
-    Datastar read their data-signals attributes.
-    ═══════════════════════════════════════════════════════════════════
-  -->
-
-  <!-- 1. Worker event bus — dispatches to window.workerPool -->
-  <local-event-script
-    id="worker-controller"
-    data-signals:workerCount="4"
-    style="display:none"
-  >
-    <!-- Commands and on-events added in Step 7 -->
-  </local-event-script>
-
-  <!-- 2. Page-level load sequencer — splash exit, data fetch orchestration -->
-  <local-event-script
-    id="page-controller"
-    data-signals:dataState="'loading'"
-    data-signals:earthquakesReady="false"
-    data-signals:weatherReady="false"
-    data-signals:firesReady="false"
-    data-signals:settingsOpen="false"
-    data-signals:audioPlaying="false"
-    data-signals:audioMuted="false"
-    style="display:none"
-  >
-    <!-- Commands and on-events added in Step 7 -->
-  </local-event-script>
-
-  <!-- 3. Map animator — camera pan, screen shake, layer enter/exit -->
-  <local-event-script
-    id="map-controller"
-    data-signals:strongestPOI="null"
-    data-signals:shakeIntensity="0"
-    data-signals:flightsEnabled="false"
-    data-signals:wEarthquake="0.5"
-    data-signals:wFire="0.35"
-    data-signals:wTemp="0.15"
-    data-signals:pinnedWeights="{ eq: false, fire: false, temp: false }"
-    data-signals:lastPinnedWeight="''"
-    style="display:none"
-  >
-    <!-- Commands and on-events added in Step 7 -->
-  </local-event-script>
-
-  <!-- 4. Timeline — play/pause/speed/wrap -->
-  <local-event-script
-    id="timeline-controller"
-    data-signals:currentHour="0"
-    data-signals:currentDatetime="''"
-    data-signals:playing="false"
-    data-signals:autoPlaySpeed="1"
-    style="display:none"
-  >
-    <!-- Commands and on-events added in Step 7 -->
-  </local-event-script>
-
-  <!-- 5. Presence — sign-in, other-user sync, pin/share -->
-  <local-event-script
-    id="presence-controller"
-    data-signals:userName="''"
-    data-signals:userInitials="''"
-    data-signals:datePinned="false"
-    data-signals:pinnedHour="null"
-    data-signals:otherUsers="[]"
-    style="display:none"
-  >
-    <!-- Commands and on-events added in Step 7 -->
-  </local-event-script>
-
-  <!--
-    ═══════════════════════════════════════════════════════════════════
-    APP SHELL
-    sandwich-layout: header(auto) / main(1fr) / footer(auto), 100dvh
+    APP SHELL — sandwich-layout: header / main / footer
+    Pure HTML, no LES nesting. LES controllers above address
+    these elements by ID.
     ═══════════════════════════════════════════════════════════════════
   -->
   <sandwich-layout id="app-shell">
 
-    <!-- ── Header ─────────────────────────────────────────────────── -->
+    <!-- Header: CSS Grid 1fr/auto/1fr for true center-brand layout -->
     <header id="app-header">
-      <cluster-layout justify="space-between" align="center" no-wrap style="height:100%">
+      <div id="app-header-inner">
         <a href="/" class="nav-back" aria-label="Back to demos">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
             <path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1003,70 +768,54 @@
           demos
         </a>
         <span class="brand" aria-label="LES demo">LES</span>
-        <button
-          id="hamburger-btn"
-          aria-label="Open settings"
-          aria-expanded="false"
-          aria-controls="settings-modal"
-        >
-          <svg width="14" height="12" viewBox="0 0 14 12" fill="none" aria-hidden="true">
-            <line x1="0" y1="1"  x2="14" y2="1"  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            <line x1="0" y1="6"  x2="14" y2="6"  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            <line x1="0" y1="11" x2="14" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </button>
-      </cluster-layout>
+        <div class="nav-right">
+          <button id="hamburger-btn" aria-label="Open settings" aria-expanded="false" aria-controls="settings-modal">
+            <svg width="14" height="12" viewBox="0 0 14 12" fill="none" aria-hidden="true">
+              <line x1="0" y1="1"  x2="14" y2="1"  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <line x1="0" y1="6"  x2="14" y2="6"  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <line x1="0" y1="11" x2="14" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
     </header>
 
-    <!-- ── Map ────────────────────────────────────────────────────── -->
+    <!-- Map -->
     <main>
       <div id="map-container">
         <svg id="map" aria-label="Living Map — US geospatial visualization" role="img">
-          <!-- Layer 0: base map (states + borders) -->
           <g id="layer-base"    class="map-layer"></g>
-          <!-- Layer 1: wind field (triangles, opacity = normalized speed) -->
           <g id="layer-wind"    class="map-layer"></g>
-          <!-- Layer 2: temperature isobands (blue → yellow oklch) -->
           <g id="layer-temp"    class="map-layer"></g>
-          <!-- Layer 3: wildfire density (fire oklch, screen blend merges with temp) -->
           <g id="layer-fire"    class="map-layer" style="mix-blend-mode:screen"></g>
-          <!-- Layer 4: seismic contours (lime oklch) -->
           <g id="layer-seismic" class="map-layer"></g>
-          <!-- Layer 5: spikes — three sub-groups (earthquake, fire, temp) -->
           <g id="layer-spikes"  class="map-layer">
             <g id="spikes-seismic"></g>
             <g id="spikes-fire"></g>
             <g id="spikes-temp"></g>
           </g>
         </svg>
-        <!-- Layer 6: flights canvas (raster, glow, drawn via rAF) -->
         <canvas id="flights-canvas" aria-hidden="true"></canvas>
       </div>
     </main>
 
-    <!-- ── Footer timeline ────────────────────────────────────────── -->
+    <!-- Footer timeline -->
     <footer>
       <div id="timeline-footer">
         <stacked-layout gap="xs">
 
-          <!-- Scrubber track + presence indicators -->
           <div class="timeline-track" role="group" aria-label="Timeline scrubber">
             <div id="presence-indicators" aria-hidden="true"></div>
             <input
               id="scrubber"
-              type="range"
-              min="0" max="167" step="1"
+              type="range" min="0" max="167" step="1"
               data-bind:currentHour
               aria-label="Timeline position (hours)"
-              aria-valuemin="0"
-              aria-valuemax="167"
+              aria-valuemin="0" aria-valuemax="167"
             >
           </div>
 
-          <!-- Controls row -->
           <div class="timeline-controls">
-
-            <!-- Play / Pause -->
             <button id="play-pause-btn" class="ctrl-btn" aria-label="Play timeline">
               <svg id="play-icon" width="10" height="12" viewBox="0 0 10 12" aria-hidden="true">
                 <polygon points="0,0 10,6 0,12" fill="currentColor"/>
@@ -1077,28 +826,27 @@
               </svg>
             </button>
 
-            <!-- Speed -->
             <button class="ctrl-btn" id="speed-btn" aria-label="Playback speed" title="Cycle playback speed">
               <span class="speed-label" id="speed-display">1×</span>
             </button>
 
             <div style="flex:1"></div>
 
-            <!-- Current time -->
-            <time class="time-display" id="time-display" data-text="$currentDatetime">— — — — — —</time>
+            <time class="time-display" id="time-display" data-text="$currentDatetime">
+              — — — — — —
+            </time>
 
-            <!-- Pin / Share -->
             <button class="ctrl-btn" id="pin-datetime-btn"
-              aria-label="Share current position with other users"
-              title="Pin and share your current time position">
+                    aria-label="Share current position with other users"
+                    title="Pin and share your current time position">
               <svg width="12" height="14" viewBox="0 0 12 14" fill="none" aria-hidden="true">
                 <circle cx="6" cy="3" r="2.5" stroke="currentColor" stroke-width="1.2"/>
                 <line x1="6" y1="5.5" x2="6" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                 <line x1="3" y1="5.5" x2="9" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
               </svg>
             </button>
-
           </div>
+
         </stacked-layout>
       </div>
     </footer>
@@ -1116,34 +864,43 @@
   <!--
     ═══════════════════════════════════════════════════════════════════
     MODULE SCRIPTS
+    Fix [4]: D3 7.9.0 does not exist — pin to 7.8.5 (latest stable 7.x)
     ═══════════════════════════════════════════════════════════════════
   -->
   <script type="module">
-    // ── @the-design-system/layout — individual element registration ───
+    // @the-design-system/layout — register only elements used on this page
     import { define as defineStacked }
       from 'https://cdn.jsdelivr.net/npm/@the-design-system/layout@0.2.0/dist/stacked/stacked.js'
     import { define as defineCluster }
       from 'https://cdn.jsdelivr.net/npm/@the-design-system/layout@0.2.0/dist/cluster/cluster.js'
     import { define as defineSandwich }
       from 'https://cdn.jsdelivr.net/npm/@the-design-system/layout@0.2.0/dist/sandwich/sandwich.js'
+    import { define as defineRepel }
+      from 'https://cdn.jsdelivr.net/npm/@the-design-system/layout@0.2.0/dist/repel/repel.js'
+    import { define as defineOverlay }
+      from 'https://cdn.jsdelivr.net/npm/@the-design-system/layout@0.2.0/dist/overlay/overlay.js'
+    import { define as defineCentered }
+      from 'https://cdn.jsdelivr.net/npm/@the-design-system/layout@0.2.0/dist/centered/centered.js'
 
     defineStacked()
     defineCluster()
     defineSandwich()
+    defineRepel()
+    defineOverlay()
+    defineCentered()
 
-    // ── D3 v7 (resolves to latest v7.x on jsDelivr) ────────────────────
+    // D3 v7.8.5 — pinned exact version (7.9.0 does not exist on jsdelivr)
     import * as d3 from 'd3'
     window.d3 = d3
-    console.log('[d3] D3 loaded:', d3.version)
 
-    // ── Sign-in ────────────────────────────────────────────────────────
+    // ── Sign-in interaction ────────────────────────────────────────────
     const input  = document.getElementById('signin-input')
     const submit = document.getElementById('signin-submit')
 
     input.addEventListener('input', () => {
       submit.disabled = input.value.trim().length < 2
     })
-    input.addEventListener('keydown', (e) => {
+    input.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !submit.disabled) submit.click()
     })
 
@@ -1152,26 +909,23 @@
       if (name.length < 2) return
       document.getElementById('signin-overlay').classList.add('is-submitted')
       document.getElementById('splash-loading').classList.add('is-visible')
-      // Full handler (presence sync, YouTube unlock, data fetches) added in Step 7
-      console.log('[d3] signed in as:', name)
+      window._signedIn = true
+      window._signedInName = name
+      console.log('[d3] sign-in:', name)
+      step3MaybeDismissSplash()
     })
 
-    // ── Hamburger / modal (stub — full View Transition in Step 10) ────
+    // ── Modal open/close (View Transition morph added in Step 10) ─────
     function openModal() {
-      const modal = document.getElementById('settings-modal')
-      const bd    = document.getElementById('modal-backdrop')
-      modal.classList.add('is-open')
-      modal.setAttribute('aria-hidden', 'false')
-      bd.classList.add('is-open')
+      document.getElementById('settings-modal').classList.add('is-open')
+      document.getElementById('settings-modal').setAttribute('aria-hidden', 'false')
+      document.getElementById('modal-backdrop').classList.add('is-open')
       document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'true')
     }
-
     function closeModal() {
-      const modal = document.getElementById('settings-modal')
-      const bd    = document.getElementById('modal-backdrop')
-      modal.classList.remove('is-open')
-      modal.setAttribute('aria-hidden', 'true')
-      bd.classList.remove('is-open')
+      document.getElementById('settings-modal').classList.remove('is-open')
+      document.getElementById('settings-modal').setAttribute('aria-hidden', 'true')
+      document.getElementById('modal-backdrop').classList.remove('is-open')
       document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'false')
     }
 
@@ -1189,15 +943,341 @@
       workerValue.textContent = workerSlider.value
     })
 
-    // ── Weight slider live display (full pin logic in Step 9) ─────────
-    for (const [id, vid] of [['w-eq','wv-eq'],['w-fire','wv-fire'],['w-temp','wv-temp']]) {
-      document.getElementById(id).addEventListener('input', () => {
-        document.getElementById(vid).textContent =
-          parseFloat(document.getElementById(id).value).toFixed(2)
+    // ── Weight slider live display (pin logic added in Step 9) ─────────
+    for (const [id, valId] of [['w-eq','wv-eq'],['w-fire','wv-fire'],['w-temp','wv-temp']]) {
+      document.getElementById(id).addEventListener('input', e => {
+        document.getElementById(valId).textContent = parseFloat(e.target.value).toFixed(2)
       })
     }
 
-    console.log('[d3] Step 2 shell — D3:', d3.version, '/ Turf:', window.turf?.version || '7.3.4')
+    // ─────────────────────────────────────────────────────────────────
+    // STEP 3: D3 Base Map
+    // ─────────────────────────────────────────────────────────────────
+    import * as topojson from 'topojson'
+
+    // ── TopoJSON source ────────────────────────────────────────────────
+    // us-atlas@3 ships states-10m.json (1:10M resolution — right balance
+    // of detail vs performance for a full-US CONUS view).
+    // Includes state polygons + mesh for borders.
+    const US_ATLAS_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json'
+
+    // ── SVG + layer references ─────────────────────────────────────────
+    const mapSVG        = document.getElementById('map')
+    const layerBase     = document.getElementById('layer-base')
+    const mapContainer  = document.getElementById('map-container')
+
+    // ── State (module-level, shared by all D3 code) ────────────────────
+    let projection = null   // d3.geoAlbersUsa()
+    let pathGen    = null   // d3.geoPath(projection)
+    let zoomBehavior = null // d3.zoom() instance
+    let currentTransform = d3.zoomIdentity  // live transform
+
+    // ── Build projection from container size ───────────────────────────
+    // d3.geoAlbersUsa() default fits a 960×600 viewport.
+    // fitSize() recalculates scale and translate for any actual container.
+    function buildProjection(width, height) {
+      return d3.geoAlbersUsa()
+        .fitSize([width, height], { type: 'Sphere' })
+    }
+
+    // ── Initialize the map ─────────────────────────────────────────────
+    async function initMap() {
+      console.log('[d3] fetching US TopoJSON…')
+
+      // Fetch TopoJSON
+      let us
+      try {
+        us = await d3.json(US_ATLAS_URL)
+      } catch (err) {
+        console.error('[d3] failed to fetch US atlas:', err)
+        return
+      }
+
+      // Convert TopoJSON → GeoJSON
+      // states-10m.json has a "states" object; mesh gives us the borders
+      const stateFeatures = topojson.feature(us, us.objects.states)
+      const stateMesh     = topojson.mesh(us, us.objects.states, (a, b) => a !== b)
+      const nationMesh    = topojson.mesh(us, us.objects.states, (a, b) => a === b)
+
+      // Initial dimensions
+      const { width, height } = mapContainer.getBoundingClientRect()
+      projection = buildProjection(width, height)
+      pathGen    = d3.geoPath(projection)
+
+      // ── Draw base layer ──────────────────────────────────────────────
+      const base = d3.select(layerBase)
+
+      // Nation fill (ocean-colored background within US bounds — subtle)
+      base.append('path')
+        .datum({ type: 'Sphere' })
+        .attr('class', 'sphere-bg')
+        .attr('d', pathGen)
+        .attr('fill', 'none')  // transparent — bg color shows through
+
+      // State fills
+      base.selectAll('path.state')
+        .data(stateFeatures.features)
+        .join('path')
+          .attr('class', 'state')
+          .attr('d', pathGen)
+          .attr('fill', 'var(--map-state-fill, #192e1e)')
+          .attr('stroke', 'none')
+
+      // State border mesh (internal borders)
+      base.append('path')
+        .datum(stateMesh)
+        .attr('class', 'state-borders')
+        .attr('d', pathGen)
+        .attr('fill', 'none')
+        .attr('stroke', 'var(--map-border, #1e3828)')
+        .attr('stroke-width', 0.5)
+
+      // Nation outline (outer border, slightly brighter)
+      base.append('path')
+        .datum(nationMesh)
+        .attr('class', 'nation-outline')
+        .attr('d', pathGen)
+        .attr('fill', 'none')
+        .attr('stroke', 'var(--map-nation-border, #2a4a34)')
+        .attr('stroke-width', 1.2)
+
+      // ── Zoom behavior ────────────────────────────────────────────────
+      // All map layers live in the SVG root; we apply the zoom transform
+      // to a <g id="zoom-root"> that wraps them.
+      // We don't wrap them here (they're already in the SVG), so instead
+      // we use a top-level zoom container group created at init time.
+      const zoomRoot = d3.select(mapSVG).insert('g', ':first-child').attr('id', 'zoom-root')
+
+      // Move all existing layer groups into zoom-root
+      ;['layer-base','layer-wind','layer-temp','layer-fire',
+        'layer-seismic','layer-spikes'].forEach(id => {
+        zoomRoot.node().appendChild(document.getElementById(id))
+      })
+
+      zoomBehavior = d3.zoom()
+        .scaleExtent([0.8, 12])
+        .on('zoom', ({ transform }) => {
+          currentTransform = transform
+          zoomRoot.attr('transform', transform)
+        })
+
+      d3.select(mapSVG).call(zoomBehavior)
+
+      // ── Expose cached data for later steps ──────────────────────────
+      window._mapData = { us, stateFeatures, stateMesh, nationMesh }
+
+      // ── Make base layer visible using inline style (beats CSS class rule)
+      // .map-layer { opacity:0 } is a CSS class — SVG presentation attributes
+      // have lower specificity. Must use .style() for inline CSS to override.
+      // LES replaces this with animated entrances in Step 7.
+      d3.select(layerBase).style('opacity', '1')
+      d3.select(mapSVG).style('opacity', '1')
+
+      console.log('[d3] base map rendered —',
+        stateFeatures.features.length, 'states,',
+        `${Math.round(width)}×${Math.round(height)}px`)
+
+      return { stateFeatures, stateMesh }
+    }
+
+    // ── Responsive resize via ResizeObserver ───────────────────────────
+    // On resize: recalculate projection, re-render all path `d` attributes.
+    // Uses a 100ms debounce to avoid thrashing during window drag.
+    let resizeTimer = null
+
+    const resizeObserver = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        clearTimeout(resizeTimer)
+        resizeTimer = setTimeout(() => {
+          const { width, height } = entry.contentRect
+          if (!projection || width < 10 || height < 10) return
+
+          projection = buildProjection(width, height)
+          pathGen    = d3.geoPath(projection)
+
+          // Re-render all path elements that depend on the projection
+          d3.selectAll('#layer-base path').attr('d', pathGen)
+
+          // Future layers (wind triangles, spikes) will also call pathGen
+          // via window.mapController.reprojectLayer() in later steps.
+          window.mapController.projection = projection
+          window.mapController.pathGen    = pathGen
+
+          console.log('[d3] resize →', Math.round(width), '×', Math.round(height))
+        }, 100)
+      }
+    })
+
+    resizeObserver.observe(mapContainer)
+
+    // ── window.mapController ───────────────────────────────────────────
+    // The bridge between LES commands and D3 rendering.
+    // Each method returns a Promise so LES `then` can await completion.
+    // Methods that use D3 transitions return transition.end().
+    // Stubs return resolved Promises until their steps are implemented.
+    window.mapController = {
+      // Live references — updated by resize handler
+      projection: null,
+      pathGen:    null,
+
+      // ── Layer visibility ─────────────────────────────────────────────
+      /** Fade a layer in over `durationMs`. Returns Promise. */
+      enterLayer(name, durationMs = 400) {
+        const el = document.getElementById(`layer-${name}`)
+        if (!el) return Promise.resolve()
+        return d3.select(el)
+          .transition()
+          .duration(durationMs)
+          .ease(d3.easeQuadOut)
+          .attr('opacity', 1)
+          .end()
+          .catch(() => {})  // swallow AbortError from interrupted transitions
+      },
+
+      /** Fade a layer out over `durationMs`. Returns Promise. */
+      exitLayer(name, durationMs = 300) {
+        const el = document.getElementById(`layer-${name}`)
+        if (!el) return Promise.resolve()
+        return d3.select(el)
+          .transition()
+          .duration(durationMs)
+          .ease(d3.easeQuadIn)
+          .attr('opacity', 0)
+          .end()
+          .catch(() => {})
+      },
+
+      /** Instantly set layer opacity (for toggle switches). */
+      setLayerOpacity(name, opacity) {
+        const el = document.getElementById(`layer-${name}`)
+        if (el) d3.select(el).attr('opacity', opacity)
+      },
+
+      // ── Camera ───────────────────────────────────────────────────────
+      /**
+       * Pan to geographic coordinates [lon, lat] with optional zoom scale.
+       * score (0–1) maps to zoom: 0.1 → 2×, 1.0 → 6×.
+       * Returns Promise resolved when transition ends.
+       */
+      panToPOI(lon, lat, score = 0.5) {
+        if (!this.projection) return Promise.resolve()
+        const projected = this.projection([lon, lat])
+        if (!projected) return Promise.resolve()
+        const [px, py] = projected
+        const scale = 2 + score * 4  // 2× at score=0, 6× at score=1
+        const { width, height } = mapContainer.getBoundingClientRect()
+        const transform = d3.zoomIdentity
+          .translate(width / 2, height / 2)
+          .scale(scale)
+          .translate(-px, -py)
+
+        return d3.select(mapSVG)
+          .transition()
+          .duration(1200)
+          .ease(d3.easeCubicInOut)
+          .call(zoomBehavior.transform, transform)
+          .end()
+          .catch(() => {})
+      },
+
+      /** Reset zoom to fit CONUS. Returns Promise. */
+      resetZoom() {
+        return d3.select(mapSVG)
+          .transition()
+          .duration(800)
+          .ease(d3.easeCubicInOut)
+          .call(zoomBehavior.transform, d3.zoomIdentity)
+          .end()
+          .catch(() => {})
+      },
+
+      /** Return the current zoom transform (for LES shake offset math). */
+      getTransform() {
+        return currentTransform
+      },
+
+      // ── Re-projection (called by resize handler) ─────────────────────
+      reprojectLayer(/* name */) {
+        // Implemented per-layer as they're built in Steps 6–7
+        // Base layer is handled directly in the resize observer above
+      },
+
+      // ── Stubs — filled in Steps 6–9 ─────────────────────────────────
+      redrawLayer(/* name */) { return Promise.resolve() },
+      computePOIScore(/* earthquakes, fires, weather */) { return null },
+    }
+
+    // Attach live references after first render
+    window.mapController.projection = null  // set after initMap()
+    window.mapController.pathGen    = null
+
+    // ── STEP 3 TEMP helper — dismiss splash only when BOTH are ready ─────
+    // Removed in Step 7 when LES takes over the splash:exit command.
+    function step3MaybeDismissSplash() {
+      if (!window._signedIn || !window._mapReady) return
+      setTimeout(() => {
+        const splash = document.getElementById('splash')
+        if (!splash) return
+        splash.style.transition = 'opacity 0.7s ease, transform 0.7s ease'
+        splash.style.opacity = '0'
+        splash.style.transform = 'translateY(24px)'
+        splash.style.pointerEvents = 'none'
+        setTimeout(() => { splash.style.display = 'none' }, 750)
+      }, 300)
+    }
+
+    // ── Boot: wait for custom element upgrade + layout ─────────────────
+    // Strategy (most reliable — no CSS height-resolution ambiguity):
+    //
+    // 1. customElements.whenDefined('sandwich-layout') — ensures the grid
+    //    layout class has registered before we measure anything.
+    // 2. Two requestAnimationFrame passes — the browser runs style/layout
+    //    between frames, so after 2 rAFs the grid track sizes are resolved.
+    // 3. Fallback dimensions — if mapContainer still reports height=0 after
+    //    all that (e.g. very slow custom-element polyfill), we derive height
+    //    from window.innerHeight minus the known header/footer heights rather
+    //    than rendering a zero-height map.
+    // 4. ResizeObserver stays active for responsive re-projection on window
+    //    resize (handled above), but is NOT used for the initial boot.
+    const rAF = () => new Promise(r => requestAnimationFrame(r))
+
+    async function bootMap() {
+      // Wait for sandwich-layout to register
+      await customElements.whenDefined('sandwich-layout')
+      // Two rAF passes: style recalc + layout happen between frames
+      await rAF()
+      await rAF()
+
+      let { width, height } = mapContainer.getBoundingClientRect()
+
+      // Fallback: derive from viewport if CSS height still hasn't resolved
+      if (height < 10) {
+        const HEADER_H = 52
+        const FOOTER_H = 88
+        height = window.innerHeight - HEADER_H - FOOTER_H
+        console.warn('[d3] mapContainer height was 0 — using fallback:', height)
+      }
+      if (width < 10) {
+        width = window.innerWidth
+      }
+
+      console.log('[d3] initiating map at', Math.round(width), '×', Math.round(height))
+
+      const result = await initMap()
+      if (!result) return
+
+      window.mapController.projection = projection
+      window.mapController.pathGen    = pathGen
+      console.log('[d3] mapController ready')
+
+      // [STEP3-TEMP-START] — replaced by LES in Step 7
+      window._mapReady = true
+      step3MaybeDismissSplash()
+      // [STEP3-TEMP-END]
+    }
+
+    bootMap().catch(err => console.error('[d3] boot failed:', err))
+    console.log('[d3] Step 3 init — D3:', d3.version, '| Turf:', window.turf?.version ?? '7.3.4')
   </script>
 
 </body>
