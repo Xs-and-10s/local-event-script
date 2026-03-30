@@ -494,11 +494,24 @@
     ═══════════════════════════════════════════════════════════════════
   -->
 
-  <!-- Worker pool event bus — no HTML children -->
+  <!--
+    Worker pool event bus — no visual children.
+    Routes results from window.workerPool → LES broadcast → all instances.
+  -->
   <local-event-script
     id="worker-controller"
     data-signals:workerCount="4"
-  ></local-event-script>
+  >
+    <on-load run="emit workers:initialized"></on-load>
+
+    <on-event name="workers:result-received" handle="`
+      broadcast workers:result [payload[0]  payload[1]]
+    `"></on-event>
+
+    <on-event name="workers:initialized" handle="`
+      broadcast workers:initialized
+    `"></on-event>
+  </local-event-script>
 
   <!-- Page-level load sequence and splash exit -->
   <local-event-script
@@ -942,6 +955,13 @@
     workerSlider.addEventListener('input', () => {
       workerValue.textContent = workerSlider.value
     })
+    workerSlider.addEventListener('change', () => {
+      const n = parseInt(workerSlider.value)
+      if (window.workerPool) {
+        window.workerPool.resize(n)
+        console.log('[d3] worker pool resized to', n)
+      }
+    })
 
     // ── Weight slider live display (pin logic added in Step 9) ─────────
     for (const [id, valId] of [['w-eq','wv-eq'],['w-fire','wv-fire'],['w-temp','wv-temp']]) {
@@ -1226,6 +1246,30 @@
       }, 300)
     }
 
+    // ── Worker pool ───────────────────────────────────────────────────────
+    // Imported as an ES module. The pool spawns workers immediately and
+    // exposes window.workerPool for use by mapController and LES commands.
+    import { createWorkerPool } from '/workers/pool.js'
+
+    // Size from hardware detection (same as the slider default)
+    const initialWorkerCount = Math.min(8, Math.max(2, (navigator.hardwareConcurrency || 4) - 1))
+    window.workerPool = createWorkerPool(initialWorkerCount)
+
+    // Listen for analysis results broadcast by #worker-controller LES.
+    // The map controller (Step 6) will act on these; registered here
+    // early so we don't miss any results.
+    document.addEventListener('workers:result', (e) => {
+      const [task, resultJson] = e.detail?.payload || []
+      if (!task) return
+      let result
+      try { result = typeof resultJson === 'string' ? JSON.parse(resultJson) : resultJson }
+      catch { return }
+      console.log('[d3] worker result:', task, Array.isArray(result?.features)
+        ? `${result.features.length} features`
+        : result)
+      // Step 6 will replace this log with real layer re-draws
+    })
+
     // ── Boot: wait for custom element upgrade + layout ─────────────────
     // Strategy (most reliable — no CSS height-resolution ambiguity):
     //
@@ -1277,7 +1321,7 @@
     }
 
     bootMap().catch(err => console.error('[d3] boot failed:', err))
-    console.log('[d3] Step 3 init — D3:', d3.version, '| Turf:', window.turf?.version ?? '7.3.4')
+    console.log('[d3] Step 3 init — D3:', typeof d3.geoPath === 'function' ? 'loaded ✓' : 'MISSING', '| Turf:', typeof window.turf?.area === 'function' ? '7.3.4 ✓' : 'MISSING')
   </script>
 
 </body>
