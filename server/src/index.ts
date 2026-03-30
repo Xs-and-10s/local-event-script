@@ -3,9 +3,31 @@ import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { feed } from './routes/feed.ts'
 import { form } from './routes/form.ts'
+import { d3, logD3KeyStatus } from './routes/d3.ts'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { config } from 'node:process'
+
+// Load .env if present (Node 20.6+ supports --env-file; this is a manual fallback)
+try {
+  const { readFileSync } = await import('node:fs')
+  const envPath = new URL('../.env', import.meta.url)
+  const envText = readFileSync(envPath, 'utf-8')
+  for (const line of envText.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eqIdx = trimmed.indexOf('=')
+    if (eqIdx < 0) continue
+    const key = trimmed.slice(0, eqIdx).trim()
+    const val = trimmed.slice(eqIdx + 1).trim()
+    if (key && !(key in process.env)) {
+      process.env[key] = val
+    }
+  }
+} catch {
+  // .env not present — keys come from actual env or are absent (graceful)
+}
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = join(__dirname, '..', '..')   // local-event-script/
@@ -13,20 +35,18 @@ const ROOT = join(__dirname, '..', '..')   // local-event-script/
 const app = new Hono()
 
 // ─── API routes ───────────────────────────────────────────────────────────────
-app.route('/api/feed', feed)
-app.route('/api/form', form)
+app.route('/api/feed',     feed)
+app.route('/api/form',     form)
+app.route('/api/d3',       d3)
 
 // ─── Demo page routes ─────────────────────────────────────────────────────────
-// Each demo slug maps to an HTML file in the repo root.
-// Add new demos here as they're created — the gallery index.html
-// links to these URLs, and the server resolves them to the right file.
-
 const DEMO_PAGES: Record<string, string> = {
   '/feed':   'feed.html',
-  '/splash': 'splash.html',   // coming soon
-  '/scroll': 'scroll.html',   // coming soon
-  '/cards':  'cards.html',    // coming soon
-  '/form':   'form.html',     // coming soon
+  '/splash': 'splash.html',
+  '/scroll': 'scroll.html',
+  '/cards':  'cards.html',
+  '/form':   'form.html',
+  '/d3':     'd3.html',     // "Living Map" — earthquakes, wind & fire
 }
 
 for (const [route, file] of Object.entries(DEMO_PAGES)) {
@@ -35,33 +55,43 @@ for (const [route, file] of Object.entries(DEMO_PAGES)) {
       const html = await readFile(join(ROOT, file), 'utf-8')
       return c.html(html)
     } catch {
-      // File doesn't exist yet — show a friendly placeholder
       return c.html(comingSoonPage(route, file))
     }
   })
 }
 
 // ─── Static files ─────────────────────────────────────────────────────────────
-// Serves /dist/, /scroll-effects.js, /spring-physics.js, /index.html, etc.
 app.use('/*', serveStatic({ root: ROOT }))
 
 // ─── Dev startup ──────────────────────────────────────────────────────────────
 const PORT = 3000
 
 serve({ fetch: app.fetch, port: PORT }, () => {
-  console.log(`\n  ┌──────────────────────────────────────────────────┐`)
-  console.log(`  │  local-event-script dev server                    │`)
-  console.log(`  │  http://localhost:${PORT}                            │`)
-  console.log(`  │                                                    │`)
-  console.log(`  │  /          gallery (index.html)                   │`)
-  console.log(`  │  /feed      activity feed demo                     │`)
-  console.log(`  │  /splash    splash screen demo                      │`)
-  console.log(`  │  /scroll    scroll reveal demo                      │`)
-  console.log(`  │  /cards     card interactions demo                  │`)
-  console.log(`  │  /form      form choreography demo                  │`)
-  console.log(`  │                                                    │`)
-  console.log(`  │  API: GET /api/feed?filter=all|unread|mentions     │`)
-  console.log(`  └──────────────────────────────────────────────────┘\n`)
+  console.log(``)
+  console.log(`  ┌──────────────────────────────────────────────────────┐`)
+  console.log(`  │  local-event-script dev server                        │`)
+  console.log(`  │  http://localhost:${PORT}                              │`)
+  console.log(`  │                                                        │`)
+  console.log(`  │  /          gallery (index.html)                       │`)
+  console.log(`  │  /feed      activity feed demo                         │`)
+  console.log(`  │  /splash    splash screen demo                         │`)
+  console.log(`  │  /scroll    scroll reveal demo                         │`)
+  console.log(`  │  /cards     card interactions demo                     │`)
+  console.log(`  │  /form      form choreography demo                     │`)
+  console.log(`  │  /d3        living map — earthquakes, wind & fire      │`)
+  console.log(`  │                                                        │`)
+  console.log(`  │  API:  GET  /api/feed?filter=all|unread|mentions       │`)
+  console.log(`  │        POST /api/form                                  │`)
+  console.log(`  │        GET  /api/d3/earthquakes                        │`)
+  console.log(`  │        GET  /api/d3/weather                            │`)
+  console.log(`  │        GET  /api/d3/fires                              │`)
+  console.log(`  │        GET  /api/d3/flights                            │`)
+  console.log(`  │        GET  /api/d3/presence  (SSE)                   │`)
+  console.log(`  │        POST /api/d3/presence                           │`)
+  console.log(`  │                                                        │`)
+  logD3KeyStatus()
+  console.log(`  └──────────────────────────────────────────────────────┘`)
+  console.log(``)
 })
 
 // ─── Coming-soon placeholder ──────────────────────────────────────────────────
