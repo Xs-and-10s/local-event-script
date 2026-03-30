@@ -16,6 +16,7 @@
  */
 
 import type { LESModule, LESPrimitive } from '../types.js'
+import { shake } from './shake.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utility: query all matching elements within the host scope
@@ -249,6 +250,7 @@ const animationModule: LESModule = {
     'pulse':         pulse,
     'stagger-enter': staggerEnter,
     'stagger-exit':  staggerExit,
+    'shake':         shake,
   },
 }
 

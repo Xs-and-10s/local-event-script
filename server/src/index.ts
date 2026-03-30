@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { feed } from './routes/feed.ts'
+import { form } from './routes/form.ts'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +14,7 @@ const app = new Hono()
 
 // ─── API routes ───────────────────────────────────────────────────────────────
 app.route('/api/feed', feed)
+app.route('/api/form', form)
 
 // ─── Demo page routes ─────────────────────────────────────────────────────────
 // Each demo slug maps to an HTML file in the repo root.
@@ -56,7 +58,7 @@ serve({ fetch: app.fetch, port: PORT }, () => {
   console.log(`  │  /splash    splash screen demo                      │`)
   console.log(`  │  /scroll    scroll reveal demo                      │`)
   console.log(`  │  /cards     card interactions demo                  │`)
-  console.log(`  │  /form      form choreography (coming soon)        │`)
+  console.log(`  │  /form      form choreography demo                  │`)
   console.log(`  │                                                    │`)
   console.log(`  │  API: GET /api/feed?filter=all|unread|mentions     │`)
   console.log(`  └──────────────────────────────────────────────────┘\n`)

@@ -18,6 +18,7 @@ const ANIMATION_PRIMITIVES = new Set([
   'fade-in', 'fade-out', 'slide-in', 'slide-out',
   'slide-up', 'slide-down', 'pulse',
   'stagger-enter', 'stagger-exit',
+  'shake',
 ])
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -191,11 +192,9 @@ export class LESParser {
     if (ANIMATION_PRIMITIVES.has(first)) return this.parseAnimation(text, token)
 
     // ── Animation primitive (userland module) ────────────────────────────────
-    // Any hyphenated word followed by a CSS selector + duration looks like an
-    // animation call. This handles userland primitives like `scroll-reveal`,
-    // `spring-in`, etc. registered via <use-module src="...">.
-    // Pattern: word-with-hyphen  .selector-or-#id  Nms  easing  [opts?]
-    if (first.includes('-') && looksLikeAnimationCall(text)) {
+    // Any word followed by a CSS selector looks like an animation call.
+    // Covers both hyphenated names (scroll-reveal, spring-in) and bare names (shake).
+    if (looksLikeAnimationCall(text)) {
       return this.parseAnimation(text, token)
     }
 

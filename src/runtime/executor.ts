@@ -297,7 +297,17 @@ export function evalExpr(node: ExprNode, ctx: LESContext): unknown {
   // These are not valid JS expressions but appear as animation option values.
   // Return them as strings so the animation module can interpret them directly.
   if (/^\d+(\.\d+)?ms$/.test(node.raw)) return node.raw                   // "20ms", "40ms"
-  if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(node.raw)) return node.raw            // "reverse", "right", "ease-out"
+  if (/^\d+(\.\d+)?px$/.test(node.raw)) return node.raw                   // "7px", "12px"
+  if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(node.raw)) {
+    // Scope lookup first — bare identifiers can be local variables (e.g. `selector`,
+    // `id`, `filter`) OR animation keyword strings (e.g. `right`, `reverse`, `simplex`).
+    // Variables win. Only return the raw string if nothing is found in scope/signals.
+    const scoped = ctx.scope.get(node.raw)
+    if (scoped !== undefined) return scoped
+    const signaled = ctx.getSignal(node.raw)
+    if (signaled !== undefined) return signaled
+    return node.raw   // keyword string: "reverse", "right", "ease-out", "simplex", etc.
+  }
   if (/^(cubic-bezier|steps|linear)\(/.test(node.raw)) return node.raw      // "cubic-bezier(0.22,1,0.36,1)
 
   try {

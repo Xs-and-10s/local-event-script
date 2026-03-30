@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LES — Form Choreography Demo</title>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "datastar": "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js"
+      }
+    }
+  </script>
+  <script type="module" src="/dist/local-event-script.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      --bg:      #0f1117;
+      --surface: #1a1d27;
+      --border:  #2a2d3a;
+      --text:    #e2e4ec;
+      --muted:   #6b7280;
+      --accent:  #7c6cf7;
+      --green:   #4ade80;
+      --red:     #f87171;
+      --amber:   #f59e0b;
+    }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 1rem 4rem;
+    }
+
+    nav {
+      width: 100%;
+      max-width: 560px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.1rem 0;
+    }
+    nav a       { color: var(--muted); text-decoration: none; font-size: 0.8rem; }
+    nav a:hover { color: var(--text); }
+    nav .brand  { font-size: 0.8rem; font-weight: 600; color: var(--accent);
+                  letter-spacing: 0.05em; font-variant: small-caps; }
+
+    /* ── Page header ── */
+    .page-header {
+      width: 100%;
+      max-width: 560px;
+      padding: 1.5rem 0 2rem;
+    }
+    .page-header h1 {
+      font-size: 1.8rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.5rem;
+    }
+    .page-header p {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 0;
+      line-height: 1.6;
+    }
+
+    /* ── Step indicator ── */
+    .step-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 2rem;
+    }
+    .step-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+      transition: background 0.3s, transform 0.3s;
+    }
+    .step-dot.active    { background: var(--accent); transform: scale(1.3); }
+    .step-dot.completed { background: var(--green); }
+    .step-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-left: 0.25rem;
+    }
+
+    /* ── Form shell ── */
+    .form-shell {
+      width: 100%;
+      max-width: 560px;
+      position: relative;
+      height: 380px;
+      /* clip-path instead of overflow:hidden — allows 20px side bleed for shake
+         while still masking the sliding steps during transitions */
+      clip-path: inset(0 -20px);
+    }
+
+    /* ── Steps — all absolutely stacked; LES controls opacity/transform ── */
+    .step {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transform: translateX(80px);
+      pointer-events: none;
+      overflow: visible; /* allow shake to exceed bounds without clipping */
+    }
+    /* is-active only opens pointer-events; LES sets opacity/transform */
+    .step.is-active {
+      pointer-events: auto;
+    }
+    /* Step 1 starts visible (LES slide-in runs on init) */
+    #step-1 { transform: translateX(0); }
+
+    /* ── Field groups — outlined floating label ─────────────────────────────
+       Label sits on the top border line, inset 12px from the left.
+       It starts inside the field and floats to the border on focus/fill.
+       Requires placeholder=" " (single space) on every input/textarea
+       so :placeholder-shown can detect empty state.
+    ── */
+    .field-group {
+      margin-bottom: 1.5rem;
+      position: relative;
+    }
+
+    /* The label floats on the border */
+    .field-group label {
+      position: absolute;
+      left: 12px;
+      /* Sits exactly on the top border line */
+      top: -0.55em;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      /* Gap in the border behind the label text */
+      background: var(--surface);
+      padding: 0 4px;
+      pointer-events: none;
+      line-height: 1;
+      transition: color 0.15s;
+      z-index: 1;
+    }
+
+    /* Required indicator */
+    .field-group label .req {
+      color: var(--red);
+      margin-left: 2px;
+    }
+
+    .field-group input,
+    .field-group textarea {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      /* Extra top padding so text doesn't overlap the label */
+      padding: 1rem 1rem 0.65rem;
+      color: var(--text);
+      font-size: 0.95rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+      resize: vertical;
+    }
+    .field-group input:focus,
+    .field-group textarea:focus {
+      border-color: var(--accent);
+    }
+    .field-group input:focus ~ label,
+    .field-group textarea:focus ~ label {
+      color: var(--accent);
+    }
+    .field-group input.is-invalid,
+    .field-group textarea.is-invalid {
+      border-color: var(--red);
+    }
+    .field-group input.is-invalid ~ label,
+    .field-group textarea.is-invalid ~ label {
+      color: var(--red);
+    }
+    /* Read-only review fields */
+    .field-group input[readonly],
+    .field-group textarea[readonly] {
+      border-color: #22263a;
+      background: #13151f;
+      color: var(--muted);
+      cursor: default;
+    }
+    .field-error {
+      font-size: 0.75rem;
+      color: var(--red);
+      margin-top: 0.35rem;
+      min-height: 1em;
+    }
+
+    .step-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin: 0 0 1.5rem;
+      color: var(--text);
+    }
+
+    .step-desc {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin: -0.75rem 0 1.5rem;
+      line-height: 1.5;
+    }
+
+    /* ── Navigation buttons — outside form-shell so never clipped ── */
+    .step-nav {
+      width: 100%;
+      max-width: 560px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 1rem;
+      gap: 0.75rem;
+      min-height: 48px; /* reserve height even when nav is empty */
+    }
+    .btn {
+      padding: 0.65rem 1.5rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s, background 0.15s;
+      font-family: inherit;
+    }
+    .btn:hover   { opacity: 0.85; }
+    .btn:focus   { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .btn:focus:not(:focus-visible) { outline: none; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; margin-left: auto; }
+    .btn-ghost   { background: transparent; color: var(--muted);
+                   border: 1px solid var(--border); }
+    .btn-submit  { background: var(--green); color: #0f1117; font-weight: 600; margin-left: auto; }
+
+    /* ── Loading state on submit button ── */
+    .btn-submit.is-loading {
+      background: var(--border);
+      color: var(--muted);
+      cursor: wait;
+    }
+    .btn-submit.is-loading::after {
+      content: ' ·';
+      animation: dots 1s infinite;
+    }
+    @keyframes dots {
+      0%   { content: ' ·'; }
+      33%  { content: ' ··'; }
+      66%  { content: ' ···'; }
+      100% { content: ' ·'; }
+    }
+
+    /* ── Error banner (rescue path) ── */
+    .error-banner {
+      background: rgba(248, 113, 113, 0.1);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      color: var(--red);
+      margin-bottom: 1rem;
+      opacity: 0;
+      transform: translateY(-8px);
+      transition: opacity 0.2s, transform 0.2s;
+    }
+    .error-banner.is-visible {
+      opacity: 1;
+      transform: none;
+    }
+
+    /* ── Success screen ── */
+    #step-success {
+      text-align: center;
+      padding: 1.5rem 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .success-icon {
+      font-size: 4rem;
+      line-height: 1;
+      opacity: 0;
+    }
+    #step-success h2 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin: 0;
+      opacity: 0;
+      color: var(--green);
+      letter-spacing: -0.02em;
+    }
+    #step-success p {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin: 0;
+      max-width: 400px;
+      line-height: 1.6;
+      opacity: 0;
+    }
+    /* success-reveal: start invisible+shifted; stagger-enter animates in */
+    .success-reveal { opacity: 0; transform: translateY(30px); }
+    .btn-restart { opacity: 0; }
+
+    /* ── Concept legend ── */
+    .legend {
+      width: 100%;
+      max-width: 560px;
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+    }
+    .legend-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+    .legend-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 0.75rem;
+    }
+    .legend-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+    }
+    .legend-item .name {
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: var(--accent);
+      margin-bottom: 0.25rem;
+      font-weight: 600;
+    }
+    .legend-item .desc {
+      font-size: 0.72rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="/">← demos</a>
+  <span class="brand">LES</span>
+  <a href="https://github.com" target="_blank">GitHub</a>
+</nav>
+
+<!--
+  ═══════════════════════════════════════════════════════════════════════
+  LES DEFINITION
+  ═══════════════════════════════════════════════════════════════════════
+-->
+<local-event-script
+  id="form-controller"
+  data-signals:currentStep="1"
+  data-signals:formState="'idle'"
+  data-signals:formResult="''"
+  data-signals:formMessage="''"
+  data-signals:name="''"
+  data-signals:email="''"
+  data-signals:message="''"
+>
+  <use-module type="animation"></use-module>
+
+  <!-- LIFECYCLE -->
+  <on-load run="emit form:initialized"></on-load>
+
+  <!-- SIGNAL WATCHERS -->
+  <!--
+    formResult is patched by the server SSE response.
+    When it changes while submitting, the submission has completed.
+  -->
+  <on-signal
+    name="$formResult"
+    when="$formState == 'submitting'"
+    handle="`
+      match $formResult
+        ['accepted'] -> emit form:succeeded
+        ['rejected'] -> emit form:failed [$formMessage]
+      /match
+    `"
+  ></on-signal>
+
+
+  <!--
+    ══════════════════════════════════════════════════════
+    COMMANDS
+    ══════════════════════════════════════════════════════
+  -->
+
+  <!--
+    step:enter — slide the target step in from the right.
+    args: stepId:str — e.g. "step-1", "step-2"
+  -->
+  <local-command
+    name="step:enter"
+    args="[stepId:str]"
+    guard="$formState == 'idle'"
+    do="`
+      slide-in [data-step-id: stepId]  380ms cubic-bezier(0.22,1,0.36,1) [from: right]
+    `"
+  ></local-command>
+
+  <!--
+    step:exit — slide the current step out to the left.
+    args: stepId:str
+  -->
+  <local-command
+    name="step:exit"
+    args="[stepId:str]"
+    guard="$formState == 'idle'"
+    do="`
+      slide-out [data-step-id: stepId]  280ms ease-in [to: left]
+    `"
+  ></local-command>
+
+  <!--
+    step:exit-back — slide a step out to the right (going back).
+    args: stepId:str
+  -->
+  <local-command
+    name="step:exit-back"
+    args="[stepId:str]"
+    guard="$formState == 'idle'"
+    do="`
+      slide-out [data-step-id: stepId]  280ms ease-in [to: right]
+    `"
+  ></local-command>
+
+  <!--
+    step:enter-back — slide a step in from the left (going back).
+    args: stepId:str
+  -->
+  <local-command
+    name="step:enter-back"
+    args="[stepId:str]"
+    guard="$formState == 'idle'"
+    do="`
+      slide-in [data-step-id: stepId]  380ms cubic-bezier(0.22,1,0.36,1) [from: left]
+    `"
+  ></local-command>
+
+  <!--
+    fields:shake — shake invalid fields to signal error.
+    args: selector:str — CSS selector for the fields to shake
+  -->
+  <local-command
+    name="fields:shake"
+    args="[selector:str]"
+    do="`
+      shake [data-field: selector]  420ms linear [axis: x  noise: simplex  amplitude: 7px  decay: true]
+    `"
+  ></local-command>
+
+  <!--
+    form:submit — the centrepiece: try/rescue/afterwards.
+    Sends the form data, handles success and error paths,
+    always cleans up the loading state in afterwards.
+    Guard: only while idle (prevents double-submit).
+  -->
+  <local-command
+    name="form:submit"
+    args="[name:str  email:str  message:str]"
+    guard="$formState == 'idle'"
+    do="`
+      set $formState to 'submitting'
+      then try
+        @post '/api/form' [name: name  email: email  message: message]
+      rescue
+        emit form:failed ['network-error']
+      afterwards
+        set $formState to 'idle'
+      /try
+    `"
+  ></local-command>
+
+  <!--
+    celebration:enter — success animation sequence.
+    Staggers the success screen elements in with spring easing.
+  -->
+  <local-command
+    name="celebration:enter"
+    guard="$formState == 'idle'"
+    do="`
+      slide-in [data-step-id: step-success]  400ms cubic-bezier(0.22,1,0.36,1) [from: right]
+      then wait 120ms
+      then fade-in .success-icon  320ms cubic-bezier(0.22,1,0.36,1)
+      then stagger-enter .success-reveal  360ms cubic-bezier(0.22,1,0.36,1) [gap: 100ms  from: down]
+    `"
+  ></local-command>
+
+
+  <!--
+    ══════════════════════════════════════════════════════
+    EVENTS
+    ══════════════════════════════════════════════════════
+  -->
+
+  <!-- form:initialized — page loaded, show step 1 -->
+  <on-event name="form:initialized" handle="`
+    fade-in [data-step-id: step-1]  300ms ease-out
+  `"></on-event>
+
+  <!--
+    step:advanced — user clicked Next.
+    payload[0] = current step number (1 or 2)
+  -->
+  <on-event name="step:advanced" handle="`
+    call step:exit    [stepId: payload[0]]
+    then set $currentStep to $currentStep + 1
+    then call step:enter [stepId: payload[1]]
+  `"></on-event>
+
+  <!--
+    step:retreated — user clicked Back.
+    payload[0] = current step, payload[1] = previous step
+  -->
+  <on-event name="step:retreated" handle="`
+    call step:exit-back    [stepId: payload[0]]
+    then set $currentStep to $currentStep - 1
+    then call step:enter-back [stepId: payload[1]]
+  `"></on-event>
+
+  <!--
+    form:submitted — user clicked Submit.
+    Routes to the form:submit command (try/rescue/afterwards).
+  -->
+  <on-event name="form:submitted" handle="`
+    call form:submit [name: payload[0]  email: payload[1]  message: payload[2]]
+  `"></on-event>
+
+  <!--
+    form:succeeded — server accepted the submission.
+    Exit the current step, enter the success screen.
+  -->
+  <on-event name="form:succeeded" handle="`
+    call step:exit [stepId: step-3]
+    then call celebration:enter
+    then broadcast form:succeeded
+  `"></on-event>
+
+  <!--
+    form:failed — server rejected or network error.
+    payload[0] = error message
+    Shake the fields to signal the error.
+  -->
+  <on-event name="form:failed" handle="`
+    shake [data-step-id: step-3]  420ms linear [axis: x  noise: simplex  amplitude: 6px  decay: true]
+  `"></on-event>
+
+  <!--
+    form:restarted — user wants to fill in the form again.
+  -->
+  <on-event name="form:restarted" handle="`
+    set $currentStep to 1
+    then set $formResult to ''
+    then call step:enter [stepId: step-1]
+  `"></on-event>
+
+
+  <!-- ═══════════ PAGE CONTENT ═══════════ -->
+
+  <div class="page-header">
+    <h1>Form choreography</h1>
+    <p>
+      A three-step form. Each transition is a LES command.
+      The submit uses <code>try / rescue / afterwards</code> —
+      try the POST, rescue on error, always clean up loading state.
+      Invalid submissions get a <code>shake</code> (Simplex noise, x-axis).
+    </p>
+  </div>
+
+  <!-- Step indicator -->
+  <div class="step-indicator">
+    <div class="step-dot active"    id="dot-1"></div>
+    <div class="step-dot"           id="dot-2"></div>
+    <div class="step-dot"           id="dot-3"></div>
+    <span class="step-label" id="step-label">Step 1 of 3</span>
+  </div>
+
+  <!-- Form shell — all steps live here, positioned absolutely -->
+  <div class="form-shell">
+
+    <!-- Step 1: About you -->
+    <div class="step is-active" data-step-id="step-1" id="step-1">
+      <h2 class="step-title">About you</h2>
+      <div class="field-group">
+        <input
+          id="name"
+          type="text"
+          placeholder=" "
+          data-bind:name
+          data-field="name"
+          autocomplete="name"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();advanceStep('step-1','step-2');}"
+        >
+        <label for="name">Your name <span class="req">*</span></label>
+        <p class="field-error" id="name-error"></p>
+      </div>
+      <div class="field-group">
+        <input
+          id="email"
+          type="email"
+          placeholder=" "
+          data-bind:email
+          data-field="email"
+          autocomplete="email"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();advanceStep('step-1','step-2');}"
+        >
+        <label for="email">Email address <span class="req">*</span></label>
+        <p class="field-error" id="email-error"></p>
+      </div>
+    </div>
+
+    <!-- Step 2: Your message -->
+    <div class="step" data-step-id="step-2" id="step-2">
+      <h2 class="step-title">Your message</h2>
+      <p class="step-desc">At least 20 characters — give us something to work with.</p>
+      <div class="field-group">
+        <textarea
+          id="message"
+          rows="5"
+          placeholder=" "
+          data-bind:message
+          data-field="message"
+          onkeydown="if(event.key==='Enter'&&event.shiftKey){event.preventDefault();advanceStep('step-2','step-3');}"
+        ></textarea>
+        <label for="message">Message <span class="req">*</span></label>
+        <p class="field-error" id="message-error"></p>
+      </div>
+    </div>
+
+    <!-- Step 3: Review and submit -->
+    <div class="step" data-step-id="step-3" id="step-3">
+      <h2 class="step-title">Review &amp; send</h2>
+      <div class="error-banner" id="error-banner"></div>
+      <div class="field-group">
+        <input type="text" readonly placeholder=" " data-bind:name>
+        <label>Name</label>
+      </div>
+      <div class="field-group">
+        <input type="text" readonly placeholder=" " data-bind:email>
+        <label>Email</label>
+      </div>
+      <div class="field-group">
+        <textarea rows="3" readonly placeholder=" " data-bind:message style="resize:none"></textarea>
+        <label>Message</label>
+      </div>
+    </div>
+
+    <!-- Success step -->
+    <div class="step" data-step-id="step-success" id="step-success">
+      <div class="success-icon">✅</div>
+      <h2 class="success-reveal">Message sent!</h2>
+      <p class="success-reveal">
+        That <code>try / rescue / afterwards</code> you just triggered?
+        LES awaited the POST, handled the response, and cleaned up the
+        loading state — without a single <code>await</code> in your script.
+      </p>
+      <p class="success-reveal" style="font-size:0.8rem;color:var(--accent)">
+        ↓ try the rescue path: go back and submit an invalid email
+      </p>
+    </div>
+
+  </div><!-- /.form-shell -->
+
+  <!-- Nav buttons live OUTSIDE form-shell so overflow:hidden never clips them -->
+  <div class="step-nav" id="step-nav-1">
+    <button class="btn btn-primary" onclick="advanceStep('step-1','step-2')">Next →</button>
+  </div>
+  <div class="step-nav" id="step-nav-2" style="display:none">
+    <button class="btn btn-ghost" onclick="retreatStep('step-2','step-1')">← Back</button>
+    <button class="btn btn-primary" onclick="advanceStep('step-2','step-3')">Next →</button>
+  </div>
+  <div class="step-nav" id="step-nav-3" style="display:none">
+    <button class="btn btn-ghost" onclick="retreatStep('step-3','step-2')">← Back</button>
+    <button class="btn btn-submit" id="submit-btn" onclick="submitForm()">Send it →</button>
+  </div>
+  <div class="step-nav" id="step-nav-success" style="display:none">
+    <button class="btn btn-ghost btn-restart" onclick="restartForm()">↺ Start over</button>
+  </div>
+
+  <!-- Concept legend -->
+  <div class="legend">
+    <p class="legend-label">LES primitives in this demo</p>
+    <div class="legend-grid">
+      <div class="legend-item">
+        <div class="name">try / rescue / afterwards</div>
+        <div class="desc">Failable async with cleanup. The backbone of form:submit.</div>
+      </div>
+      <div class="legend-item">
+        <div class="name">shake [axis noise]</div>
+        <div class="desc">Noise-driven displacement. Simplex x-axis for invalid fields.</div>
+      </div>
+      <div class="legend-item">
+        <div class="name">on-signal</div>
+        <div class="desc">Reacts when $formResult changes. Routes to succeeded or failed.</div>
+      </div>
+      <div class="legend-item">
+        <div class="name">slide-in / slide-out</div>
+        <div class="desc">Directional transitions. right→left for forward, left→right for back.</div>
+      </div>
+      <div class="legend-item">
+        <div class="name">@post (SSE)</div>
+        <div class="desc">Datastar action. Server patches $formResult via SSE response.</div>
+      </div>
+      <div class="legend-item">
+        <div class="name">afterwards</div>
+        <div class="desc">Always runs after try/rescue. Resets formState to idle.</div>
+      </div>
+    </div>
+  </div>
+
+</local-event-script>
+
+
+<script>
+  function les() { return document.querySelector('local-event-script'); }
+
+  // ── Step navigation ───────────────────────────────────────────────────────
+
+  function advanceStep(fromId, toId) {
+    // Validate before advancing
+    if (!validateStep(fromId)) return;
+    les().fire('step:advanced', [fromId, toId]);
+    updateIndicator(toId);
+  }
+
+  function retreatStep(fromId, toId) {
+    les().fire('step:retreated', [fromId, toId]);
+    updateIndicator(toId);
+  }
+
+  function updateIndicator(activeStepId) {
+    var stepNum = parseInt(activeStepId.replace('step-', '')) || 4;
+    var dots = document.querySelectorAll('.step-dot');
+    var label = document.getElementById('step-label');
+
+    dots.forEach(function(dot, i) {
+      dot.classList.remove('active', 'completed');
+      if (activeStepId === 'step-success') {
+        dot.classList.add('completed');
+      } else {
+        if (i + 1 < stepNum) dot.classList.add('completed');
+        else if (i + 1 === stepNum) dot.classList.add('active');
+      }
+    });
+
+    if (label) {
+      label.textContent = activeStepId === 'step-success' ? 'Sent ✓' : 'Step ' + stepNum + ' of 3';
+    }
+
+    // is-active controls pointer-events only (LES owns opacity/transform)
+    document.querySelectorAll('.step').forEach(function(s) { s.classList.remove('is-active'); });
+    var next = document.getElementById(activeStepId);
+    if (next) next.classList.add('is-active');
+
+    // Show the right nav bar
+    ['step-nav-1','step-nav-2','step-nav-3','step-nav-success'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    var suffix = activeStepId === 'step-success' ? 'success' : stepNum;
+    var nav = document.getElementById('step-nav-' + suffix);
+    if (nav) nav.style.display = '';
+  }
+
+  // ── Validation (client-side, before advancing) ───────────────────────────
+
+  function validateStep(stepId) {
+    clearErrors();
+    var valid = true;
+
+    if (stepId === 'step-1') {
+      var name  = document.getElementById('name');
+      var email = document.getElementById('email');
+      if (!name.value.trim()) {
+        showError('name-error', 'Name is required');
+        name.classList.add('is-invalid');
+        shakeField('name'); valid = false;
+      }
+      if (!email.value.trim()) {
+        showError('email-error', 'Email is required');
+        email.classList.add('is-invalid');
+        shakeField('email'); valid = false;
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
+        showError('email-error', 'Enter a valid email address');
+        email.classList.add('is-invalid');
+        shakeField('email'); valid = false;
+      }
+    }
+
+    if (stepId === 'step-2') {
+      var msg = document.getElementById('message');
+      if (!msg.value.trim()) {
+        showError('message-error', 'Message is required');
+        msg.classList.add('is-invalid');
+        shakeField('message'); valid = false;
+      } else if (msg.value.trim().length < 20) {
+        showError('message-error', 'Message must be at least 20 characters');
+        msg.classList.add('is-invalid');
+        shakeField('message'); valid = false;
+      }
+    }
+
+    return valid;
+  }
+
+  function shakeField(fieldName) {
+    // Use LES shake command directly on the field element
+    les().call('fields:shake', { selector: fieldName });
+  }
+
+  function showError(id, msg) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = msg;
+  }
+
+  function clearErrors() {
+    document.querySelectorAll('.field-error').forEach(function(el) { el.textContent = ''; });
+    document.querySelectorAll('.is-invalid').forEach(function(el) { el.classList.remove('is-invalid'); });
+  }
+
+  // ── Submit ────────────────────────────────────────────────────────────────
+
+  function submitForm() {
+    var btn = document.getElementById('submit-btn');
+    if (btn) btn.classList.add('is-loading');
+    // Read values directly from DOM — don't rely on signal reads across the
+    // Datastar bridge. Pass as payload so form:submit uses local scope args.
+    var name    = (document.getElementById('name')    || {}).value || '';
+    var email   = (document.getElementById('email')   || {}).value || '';
+    var message = (document.getElementById('message') || {}).value || '';
+    les().fire('form:submitted', [name, email, message]);
+  }
+
+  // ── React to form results ─────────────────────────────────────────────────
+
+  document.addEventListener('DOMContentLoaded', function() {
+    var l = les();
+    if (!l) return;
+
+    l.addEventListener('form:succeeded', function() {
+      var btn = document.getElementById('submit-btn');
+      if (btn) btn.classList.remove('is-loading');
+      updateIndicator('step-success');
+    });
+
+    // form:succeeded broadcast — update indicator and nav
+    document.addEventListener('form:succeeded', function() {
+      updateIndicator('step-success');
+    });
+
+    l.addEventListener('form:failed', function(e) {
+      var btn = document.getElementById('submit-btn');
+      if (btn) btn.classList.remove('is-loading');
+      var msg = e.detail && e.detail.payload && e.detail.payload[0];
+      var banner = document.getElementById('error-banner');
+      if (banner) {
+        banner.textContent = msg || 'Something went wrong. Please try again.';
+        banner.classList.add('is-visible');
+      }
+    });
+  });
+
+  // ── Restart ───────────────────────────────────────────────────────────────
+
+  function restartForm() {
+    clearErrors();
+    document.querySelectorAll('input:not([readonly]), textarea:not([readonly])').forEach(function(el) {
+      el.value = '';
+    });
+    var banner = document.getElementById('error-banner');
+    if (banner) { banner.classList.remove('is-visible'); banner.textContent = ''; }
+    var btn = document.getElementById('submit-btn');
+    if (btn) btn.classList.remove('is-loading');
+    document.getElementById('step-success').classList.remove('is-active');
+    les().fire('form:restarted');
+    updateIndicator('step-1');
+  }
+
+  // ── Init: step-1 already has is-active in HTML; nav-1 visible by default ──
+</script>
+
+</body>
+</html>
