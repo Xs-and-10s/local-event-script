@@ -92,6 +92,51 @@ export async function execute(node: LESNode, ctx: LESContext): Promise<void> {
     // ── call command:name [args] ───────────────────────────────────────────
     case 'call': {
       const n = node as CallNode
+
+      // ── window.fn / globalThis.fn invocation ────────────────────────────
+      // If the command name starts with "window." or "globalThis.", resolve
+      // it as a JS function call rather than a registered <local-command>.
+      // This allows LES on-event handlers and command do-blocks to await
+      // arbitrary JS functions, including ones that return Promises.
+      //
+      // Usage in LES source:
+      //   call window.shakeAndPan
+      //   call window.enterLayersStagger
+      //
+      // Args (if any) are evaluated and spread as positional parameters:
+      //   call window.updateTimeDisplay [$currentHour]
+      //   → window.updateTimeDisplay(currentHourValue)
+      if (n.command.startsWith('window.') || n.command.startsWith('globalThis.')) {
+        const fnPath = n.command.startsWith('window.')
+          ? n.command.slice('window.'.length)
+          : n.command.slice('globalThis.'.length)
+
+        // Support dot-paths: window.mapController.enterLayer
+        const parts  = fnPath.split('.')
+        let   target: unknown = globalThis
+        for (const part of parts.slice(0, -1)) {
+          if (target == null || typeof target !== 'object') { target = undefined; break }
+          target = (target as Record<string, unknown>)[part]
+        }
+        const fnName = parts[parts.length - 1]!
+        const fn = target == null ? undefined
+          : (target as Record<string, unknown>)[fnName]
+
+        if (typeof fn !== 'function') {
+          console.warn(`[LES] window.${fnPath} is not a function (got ${typeof fn})`)
+          return
+        }
+
+        // Evaluate args — pass as positional params in declaration order
+        const evaledArgValues = Object.values(n.args)
+          .map(exprNode => evalExpr(exprNode, ctx))
+
+        const result = (fn as (...a: unknown[]) => unknown)
+          .apply(target as object, evaledArgValues)
+        if (result instanceof Promise) await result
+        return
+      }
+
       const def = ctx.commands.get(n.command)
       if (!def) {
         console.warn(`[LES] Unknown command: "${n.command}"`)

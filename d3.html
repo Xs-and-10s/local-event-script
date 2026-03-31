@@ -573,9 +573,45 @@
       broadcast data:fires-loaded
     `"></on-event>
 
-    <!-- analysis:computed fires when all workers have reported results -->
+    <!-- analysis:computed → broadcast page:data-ready -->
     <on-event name="analysis:computed" handle="`
       broadcast page:data-ready
+    `"></on-event>
+
+    <!--
+      page:data-ready — all data loaded AND map rendered.
+      Drive the full splash exit + layer stagger sequence.
+      LES `then` chains steps sequentially; `and` runs them in parallel.
+    -->
+    <!--
+      Registered commands — events call these; commands call window functions.
+      window.* calls are now fully awaited by the fixed executor.
+    -->
+
+    <!-- splash:exit — slides splash down and fades it out -->
+    <local-command name="splash:exit" do="`
+      call window.exitSplash
+    `"></local-command>
+
+    <!-- layers:enter — staggers all data layers into view -->
+    <local-command name="layers:enter" do="`
+      call window.enterLayersStagger
+    `"></local-command>
+
+    <!--
+      page:data-ready → entrance sequence.
+      1. splash:exit  (720ms, awaited)
+      2. broadcast map:layers-ready  (instant — fires shake:and-pan async)
+      3. call layers:enter  (runs CONCURRENTLY with shake+pan)
+
+      broadcast is synchronous: the shake:and-pan event handler starts its
+      async work, then LES immediately proceeds to layers:enter without
+      waiting for shake to finish. Shake and layers enter simultaneously.
+    -->
+    <on-event name="page:data-ready" handle="`
+      call splash:exit
+      then broadcast map:layers-ready
+      then call layers:enter
     `"></on-event>
   </local-event-script>
 
@@ -591,7 +627,19 @@
     data-signals:pinnedWeights="{ eq: false, fire: false, temp: false }"
     data-signals:lastPinnedWeight="''"
   >
-    <!-- LES commands and choreography added in Step 7 -->
+    <!-- shake:and-pan — screen shake then camera pan to strongest CONUS POI -->
+    <local-command name="shake:and-pan" do="`
+      call window.shakeAndPan
+    `"></local-command>
+
+    <!--
+      map:layers-ready — seismic rings are visible; shake and pan.
+      `call shake:and-pan` invokes the registered command above,
+      which awaits window.shakeAndPan (a Promise-returning JS function).
+    -->
+    <on-event name="map:layers-ready" handle="`
+      call shake:and-pan
+    `"></on-event>
   </local-event-script>
 
   <!-- Timeline: play/pause, autoplay, wrap-around -->
@@ -617,6 +665,15 @@
         call window.updateTimeDisplay($currentHour)
       `"
     ></on-signal>
+
+    <!-- Registered commands — events call these; commands call window.* -->
+    <local-command name="timeline:play-cmd"  do="`call window.timelinePlay`"></local-command>
+    <local-command name="timeline:pause-cmd" do="`call window.timelinePause`"></local-command>
+    <local-command name="timeline:speed-cmd" do="`call window.timelineSpeedCycle`"></local-command>
+
+    <on-event name="timeline:play"        handle="`call timeline:play-cmd`"></on-event>
+    <on-event name="timeline:pause"       handle="`call timeline:pause-cmd`"></on-event>
+    <on-event name="timeline:speed-cycle" handle="`call timeline:speed-cmd`"></on-event>
   </local-event-script>
 
   <!-- Presence: sign-in, timeline presence sync -->
@@ -1005,28 +1062,52 @@
       window._signedIn = true
       window._signedInName = name
       console.log('[d3] sign-in:', name)
-      step3MaybeDismissSplash()
+      // Start a post-sign-in footer fallback — if choreography fails
+      // within 12s of sign-in, force the footer visible.
+      setTimeout(() => {
+        const footer = document.getElementById('timeline-footer')
+        if (footer && footer.style.opacity !== '1') {
+          footer.style.opacity = '1'
+          console.warn('[d3] footer fallback triggered (post sign-in)')
+        }
+      }, 12000)
       // Kick off data loading — this is the user gesture Datastar needs
       window.fetchMapData()
     })
 
-    // ── Modal open/close (View Transition morph added in Step 10) ─────
+    // ── Modal open/close — with View Transition if supported ─────────────
     function openModal() {
-      document.getElementById('settings-modal').classList.add('is-open')
-      document.getElementById('settings-modal').setAttribute('aria-hidden', 'false')
-      document.getElementById('modal-backdrop').classList.add('is-open')
-      document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'true')
+      const run = () => {
+        document.getElementById('settings-modal').classList.add('is-open')
+        document.getElementById('settings-modal').setAttribute('aria-hidden', 'false')
+        document.getElementById('modal-backdrop').classList.add('is-open')
+        document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'true')
+      }
+      if (document.startViewTransition) document.startViewTransition(run)
+      else run()
     }
+
     function closeModal() {
-      document.getElementById('settings-modal').classList.remove('is-open')
-      document.getElementById('settings-modal').setAttribute('aria-hidden', 'true')
-      document.getElementById('modal-backdrop').classList.remove('is-open')
-      document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'false')
+      const run = () => {
+        document.getElementById('settings-modal').classList.remove('is-open')
+        document.getElementById('settings-modal').setAttribute('aria-hidden', 'true')
+        document.getElementById('modal-backdrop').classList.remove('is-open')
+        document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'false')
+      }
+      if (document.startViewTransition) document.startViewTransition(run)
+      else run()
     }
 
     document.getElementById('hamburger-btn').addEventListener('click', openModal)
     document.getElementById('modal-close-btn').addEventListener('click', closeModal)
     document.getElementById('modal-backdrop').addEventListener('click', closeModal)
+
+    // Close on Escape
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && document.getElementById('settings-modal').classList.contains('is-open')) {
+        closeModal()
+      }
+    })
 
     // ── Worker count slider ────────────────────────────────────────────
     const workerSlider = document.getElementById('worker-slider')
@@ -1045,6 +1126,19 @@
       }
     })
 
+    // ── Layer toggles — wire toggle-switch buttons to mapController ─────
+    document.querySelectorAll('.toggle-switch[data-layer]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const layer = btn.dataset.layer
+        const isOn  = btn.classList.toggle('is-on')
+        btn.setAttribute('aria-pressed', String(isOn))
+        if (window.mapController) {
+          if (isOn) window.mapController.enterLayer(layer, 250)
+          else      window.mapController.exitLayer(layer, 200)
+        }
+      })
+    })
+
     // ── Weight slider live display (pin logic added in Step 9) ─────────
     for (const [id, valId] of [['w-eq','wv-eq'],['w-fire','wv-fire'],['w-temp','wv-temp']]) {
       document.getElementById(id).addEventListener('input', e => {
@@ -1053,6 +1147,66 @@
     }
 
     // ─────────────────────────────────────────────────────────────────
+    // ── Audio (YouTube IFrame API) ────────────────────────────────────────
+    // The YouTube iframe is permanently offscreen. Audio starts after the
+    // sign-in user gesture (browser autoplay policy requires it).
+
+    let _ytPlayer = null
+    let _ytReady  = false
+
+    window.onYouTubeIframeAPIReady = function() {
+      _ytPlayer = new YT.Player('yt-player', {
+        events: {
+          onReady: () => {
+            _ytReady = true
+            console.log('[audio] YouTube player ready')
+            if (window._signedIn) _ytPlayer.playVideo()
+          },
+          onStateChange: e => {
+            const playing = e.data === YT.PlayerState.PLAYING
+            const playIcon  = document.getElementById('audio-play-icon')
+            const pauseIcon = document.getElementById('audio-pause-icon')
+            if (playIcon)  playIcon.style.display  = playing ? 'none' : ''
+            if (pauseIcon) pauseIcon.style.display = playing ? ''     : 'none'
+          },
+        },
+      })
+    }
+
+    // Unlock audio on sign-in user gesture
+    document.getElementById('signin-submit').addEventListener('click', () => {
+      if (_ytReady && _ytPlayer) _ytPlayer.playVideo()
+    }, { capture: true })
+
+    document.getElementById('audio-playpause-btn')?.addEventListener('click', () => {
+      if (!_ytPlayer) return
+      const state = _ytPlayer.getPlayerState?.()
+      if (state === YT.PlayerState.PLAYING) _ytPlayer.pauseVideo()
+      else _ytPlayer.playVideo()
+    })
+
+    document.getElementById('audio-restart-btn')?.addEventListener('click', () => {
+      if (!_ytPlayer) return
+      _ytPlayer.seekTo(0, true)
+      _ytPlayer.playVideo()
+    })
+
+    document.getElementById('audio-mute-btn')?.addEventListener('click', () => {
+      if (!_ytPlayer) return
+      const volIcon  = document.getElementById('audio-vol-icon')
+      const muteIcon = document.getElementById('audio-mute-icon')
+      if (_ytPlayer.isMuted()) {
+        _ytPlayer.unMute()
+        if (volIcon)  volIcon.style.display  = ''
+        if (muteIcon) muteIcon.style.display = 'none'
+      } else {
+        _ytPlayer.mute()
+        if (volIcon)  volIcon.style.display  = 'none'
+        if (muteIcon) muteIcon.style.display = ''
+      }
+    })
+
+
     // STEP 3: D3 Base Map
     // ─────────────────────────────────────────────────────────────────
     import * as topojson from 'topojson'
@@ -1244,7 +1398,8 @@
       pathGen:    null,
 
       // ── Layer visibility ─────────────────────────────────────────────
-      /** Fade a layer in over `durationMs`. Returns Promise. */
+      /** Fade a layer in over `durationMs`. Returns Promise.
+       * Uses .style('opacity') so inline CSS overrides .map-layer { opacity:0 }. */
       enterLayer(name, durationMs = 400) {
         const el = document.getElementById(`layer-${name}`)
         if (!el) return Promise.resolve()
@@ -1252,9 +1407,9 @@
           .transition()
           .duration(durationMs)
           .ease(d3.easeQuadOut)
-          .attr('opacity', 1)
+          .style('opacity', '1')
           .end()
-          .catch(() => {})  // swallow AbortError from interrupted transitions
+          .catch(() => {})
       },
 
       /** Fade a layer out over `durationMs`. Returns Promise. */
@@ -1265,7 +1420,7 @@
           .transition()
           .duration(durationMs)
           .ease(d3.easeQuadIn)
-          .attr('opacity', 0)
+          .style('opacity', '0')
           .end()
           .catch(() => {})
       },
@@ -1273,7 +1428,7 @@
       /** Instantly set layer opacity (for toggle switches). */
       setLayerOpacity(name, opacity) {
         const el = document.getElementById(`layer-${name}`)
-        if (el) d3.select(el).attr('opacity', opacity)
+        if (el) d3.select(el).style('opacity', String(opacity))
       },
 
       // ── Camera ───────────────────────────────────────────────────────
@@ -1287,7 +1442,7 @@
         const projected = this.projection([lon, lat])
         if (!projected) return Promise.resolve()
         const [px, py] = projected
-        const scale = 2 + score * 4  // 2× at score=0, 6× at score=1
+        const scale = 1.8 + score * 2.7  // 1.8× at score=0, 4.5× at score=1 — breathing room
         const { width, height } = mapContainer.getBoundingClientRect()
         const transform = d3.zoomIdentity
           .translate(width / 2, height / 2)
@@ -1296,7 +1451,7 @@
 
         return d3.select(mapSVG)
           .transition()
-          .duration(1200)
+          .duration(1400)
           .ease(d3.easeCubicInOut)
           .call(zoomBehavior.transform, transform)
           .end()
@@ -1405,20 +1560,7 @@
     window.mapController.projection = null  // set after initMap()
     window.mapController.pathGen    = null
 
-    // ── STEP 3 TEMP helper — dismiss splash only when BOTH are ready ─────
-    // Removed in Step 7 when LES takes over the splash:exit command.
-    function step3MaybeDismissSplash() {
-      if (!window._signedIn || !window._mapReady) return
-      setTimeout(() => {
-        const splash = document.getElementById('splash')
-        if (!splash) return
-        splash.style.transition = 'opacity 0.7s ease, transform 0.7s ease'
-        splash.style.opacity = '0'
-        splash.style.transform = 'translateY(24px)'
-        splash.style.pointerEvents = 'none'
-        setTimeout(() => { splash.style.display = 'none' }, 750)
-      }, 300)
-    }
+    // step3MaybeDismissSplash removed — LES page:data-ready drives splash exit
 
     // ── Worker pool ───────────────────────────────────────────────────────
     // Imported as an ES module. The pool spawns workers immediately and
@@ -2213,11 +2355,24 @@
       const EXPECTED = ['aggregation:state','scoring:poi']
       const have = EXPECTED.filter(t => window._results[t] !== undefined)
       if (have.length === EXPECTED.length) {
-        // All results in — fire analysis:computed once per full round
+        // Fire analysis:computed for LES observability
         document.getElementById('page-controller')?.dispatchEvent(
           new CustomEvent('analysis:computed', { bubbles: false })
         )
         markLoaded('li-analysis')
+
+        // LES handles page:data-ready via its event handler (executor fixed).
+        // JS fallback fires after 150ms ONLY if LES hasn't already started.
+        // LES dispatches page:data-ready synchronously via CustomEvent above,
+        // so by the time this setTimeout fires LES will have set _splashExited.
+        setTimeout(() => {
+          if (!window._splashExited && window.onPageDataReady) {
+            console.warn('[d3] LES did not handle page:data-ready — JS fallback firing')
+            window._splashExited = true
+            window.onPageDataReady()
+              .catch(err => console.warn('[d3] onPageDataReady fallback error:', err))
+          }
+        }, 150)
       }
     })
 
@@ -2225,7 +2380,542 @@
     // END STEP 5
     // ─────────────────────────────────────────────────────────────────────
 
-    // ── Boot: wait for custom element upgrade + layout ─────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 7: LES Choreography
+    // ─────────────────────────────────────────────────────────────────────
+
+    // ── Splash exit ───────────────────────────────────────────────────────
+    // Called by LES page:data-ready → exitSplash → enterLayersStagger.
+    // Also called directly if data finishes before map (fallback path).
+    window.exitSplash = function() {
+      return new Promise(resolve => {
+        const splash = document.getElementById('splash')
+        if (!splash || splash.style.display === 'none') { resolve(); return }
+        splash.classList.add('is-exiting')
+        splash.style.transition = 'opacity 0.7s ease, transform 0.7s cubic-bezier(0.4,0,0.2,1)'
+        splash.style.opacity    = '0'
+        splash.style.transform  = 'translateY(28px)'
+        splash.style.pointerEvents = 'none'
+        setTimeout(() => {
+          splash.style.display = 'none'
+          resolve()
+        }, 720)
+      })
+    }
+
+    // ── Page data ready — JS fallback path ───────────────────────────────
+    // LES page:data-ready is now the PRIMARY path (executor fixed to await
+    // window.* calls). This JS function is kept as a belt-and-suspenders
+    // fallback in case the LES chain fails (e.g. sign-in before LES ready).
+    window.onPageDataReady = async function() {
+      console.log('[d3] onPageDataReady (JS fallback) — starting splash exit')
+      window._splashExited = true
+      await window.exitSplash()
+      // Fire shake+pan immediately after splash, concurrent with layer stagger
+      document.getElementById('map-controller')
+        ?.dispatchEvent(new CustomEvent('map:layers-ready', { bubbles: false }))
+      await window.enterLayersStagger()
+      console.log('[d3] JS fallback: entrance complete')
+    }
+
+    // ── Layer entrance stagger ────────────────────────────────────────────
+    // Fade each layer in sequentially after the splash exits.
+    // Uses mapController.enterLayer() which returns a D3 transition Promise.
+    window.enterLayersStagger = async function() {
+      const mc = window.mapController
+      if (!mc) return
+
+      // Base layer: already visible (opacity set in initMap)
+      // Stagger the data layers in visual narrative order:
+      // wind first (sets the scene), then temperature (context),
+      // then fire (event), then spikes+seismic together (primary events)
+      await mc.enterLayer('wind',    350)
+      await mc.enterLayer('temp',    400)
+      await mc.enterLayer('fire',    400)
+      // Seismic + spikes together — the main event
+      await Promise.all([
+        mc.enterLayer('seismic', 500),
+        mc.enterLayer('spikes',  500),
+      ])
+      // Footer slides in
+      const footer = document.getElementById('timeline-footer')
+      if (footer) {
+        footer.style.transition = 'opacity 0.5s ease'
+        footer.style.opacity    = '1'
+      }
+      // Belt-and-suspenders: also mark SVG visible now
+      d3.select('#map').style('opacity', '1')
+    }
+
+    // ── Earthquake screen shake ───────────────────────────────────────────
+    // Called after layers are visible. Shakes the SVG viewport to
+    // communicate seismic energy. Intensity driven by strongest CONUS mag.
+    // Only fires if there are CONUS earthquakes.
+    // ── Epicentre pulse animation ─────────────────────────────────────────
+    // Called after panToPOI completes. Expands a bright lime ring outward
+    // from the epicentre dot, fading as it grows — like a seismic ripple.
+    // Runs 3 staggered pulses over ~800ms then cleans up.
+    function pulseEpicentre(lon, lat) {
+      return new Promise(resolve => {
+        const proj = window.mapController?.projection
+        if (!proj) { resolve(); return }
+        const pt = proj([lon, lat])
+        if (!pt) { resolve(); return }
+        const [cx, cy] = pt
+
+        const svg = d3.select('#layer-seismic')
+        const PULSE_COUNT = 3
+        const PULSE_GAP   = 220  // ms between each ring launch
+        const PULSE_DUR   = 700  // ms each ring expands
+        const PULSE_R     = 55   // final radius in screen px
+
+        let done = 0
+        for (let i = 0; i < PULSE_COUNT; i++) {
+          setTimeout(() => {
+            const ring = svg.append('circle')
+              .attr('cx', cx).attr('cy', cy)
+              .attr('r', 8)
+              .attr('fill', 'none')
+              .attr('stroke', '#8cf43e')
+              .attr('stroke-width', 2.5)
+              .attr('opacity', 0.90)
+
+            ring.transition()
+              .duration(PULSE_DUR)
+              .ease(d3.easeQuadOut)
+              .attr('r', PULSE_R)
+              .attr('stroke-width', 0.5)
+              .attr('opacity', 0)
+              .on('end', () => {
+                ring.remove()
+                done++
+                if (done === PULSE_COUNT) resolve()
+              })
+          }, i * PULSE_GAP)
+        }
+      })
+    }
+
+        window.shakeAndPan = async function() {
+      const mc  = window.mapController
+      const eqs = (window._data?.earthquakes || [])
+        .filter(eq => inCONUS(eq.lon, eq.lat))
+        .sort((a, b) => b.mag - a.mag)
+
+      if (!eqs.length || !mc) {
+        console.log('[d3] shakeAndPan: no CONUS earthquakes or mapController missing')
+        return
+      }
+
+      const strongest = eqs[0]
+      const score     = Math.max(0, Math.min(1, (strongest.mag - 3) / 6))
+      const intensity = Math.max(0.20, Math.min(1.0, (strongest.mag - 3) / 6))
+      console.log(`[d3] shakeAndPan M${strongest.mag.toFixed(1)} intensity=${intensity.toFixed(2)} score=${score.toFixed(2)}`)
+
+      // Shake and pan start simultaneously — they feel causally linked.
+      // shake: ~700–1000ms  |  pan: 1400ms  |  pulse: after pan
+      await Promise.all([
+        shakeSVG(intensity),
+        mc.panToPOI(strongest.lon, strongest.lat, score),
+      ])
+
+      // Pulse the epicentre dot after pan lands
+      await pulseEpicentre(strongest.lon, strongest.lat)
+    }
+
+    // ── SVG shake implementation ──────────────────────────────────────────
+    // Injects a CSS keyframe animation directly onto the map SVG.
+    // Uses translateX/Y offsets that decay over ~600ms — feels seismic.
+    function shakeSVG(intensity) {
+      return new Promise(resolve => {
+        const svg  = document.getElementById('map')
+        if (!svg) { resolve(); return }
+
+        // Amplitude: 18px at M9, 6px at M3 — strong enough to be unmistakable.
+        // High-frequency early then decaying — like real seismic P-wave then S-wave.
+        const amp = intensity * 18
+        const dur = 700 + intensity * 300  // 700–1000ms
+
+        const frames = [
+          { pct:  0,  x:  0,          y:  0          },
+          { pct:  5,  x:  amp,        y: -amp * 0.7  },  // P-wave hit
+          { pct: 12,  x: -amp * 0.9,  y:  amp * 0.8  },
+          { pct: 18,  x:  amp * 0.85, y: -amp * 0.6  },
+          { pct: 25,  x: -amp * 0.7,  y:  amp * 0.5  },  // S-wave
+          { pct: 33,  x:  amp * 0.55, y: -amp * 0.45 },
+          { pct: 42,  x: -amp * 0.40, y:  amp * 0.35 },
+          { pct: 52,  x:  amp * 0.28, y: -amp * 0.22 },
+          { pct: 63,  x: -amp * 0.18, y:  amp * 0.14 },  // coda
+          { pct: 75,  x:  amp * 0.10, y: -amp * 0.08 },
+          { pct: 87,  x: -amp * 0.05, y:  amp * 0.04 },
+          { pct: 100, x:  0,          y:  0           },
+        ]
+
+        const kfStr = frames.map(f =>
+          `${f.pct}% { transform: translate(${f.x.toFixed(1)}px, ${f.y.toFixed(1)}px); }`
+        ).join(' ')
+
+        const styleEl = document.createElement('style')
+        styleEl.id = 'shake-kf'
+        styleEl.textContent = `@keyframes map-shake { ${kfStr} }`
+        document.head.appendChild(styleEl)
+
+        svg.style.animation = `map-shake ${dur}ms ease-out forwards`
+        setTimeout(() => {
+          svg.style.animation = ''
+          document.getElementById('shake-kf')?.remove()
+          resolve()
+        }, dur + 50)
+      })
+    }
+
+    // ── Timeline controls ─────────────────────────────────────────────────
+    // Autoplay advances $currentHour by 1 every (autoPlaySpeed × 250ms).
+    // $currentHour wraps at 167 (7 days of hourly data).
+    let _playInterval = null
+    const SPEEDS = [1, 2, 4, 8]  // multipliers; 1× = 250ms per tick
+    let _speedIdx = 0
+
+    window.timelinePlay = function() {
+      if (_playInterval) return
+      const playBtn  = document.getElementById('play-pause-btn')
+      const playIcon = document.getElementById('play-icon')
+      const pauseIcon= document.getElementById('pause-icon')
+      if (playBtn)  playBtn.setAttribute('aria-label', 'Pause timeline')
+      if (playIcon) playIcon.style.display = 'none'
+      if (pauseIcon)pauseIcon.style.display = ''
+      playBtn?.classList.add('is-active')
+
+      const tick = () => {
+        const scrubber = document.getElementById('scrubber')
+        if (!scrubber) return
+        const next = (parseInt(scrubber.value) + 1) % 168
+        scrubber.value = next
+        // Manually dispatch input event so Datastar picks up the binding change
+        scrubber.dispatchEvent(new Event('input', { bubbles: true }))
+        window.updateTimeDisplay(next)
+        // Re-run analysis at new hour (workers handle the slice)
+        window.runAnalysis(next)
+      }
+
+      const ms = Math.round(250 / SPEEDS[_speedIdx])
+      _playInterval = setInterval(tick, ms)
+    }
+
+    window.timelinePause = function() {
+      if (_playInterval) { clearInterval(_playInterval); _playInterval = null }
+      const playBtn  = document.getElementById('play-pause-btn')
+      const playIcon = document.getElementById('play-icon')
+      const pauseIcon= document.getElementById('pause-icon')
+      if (playBtn)  playBtn.setAttribute('aria-label', 'Play timeline')
+      if (playIcon) playIcon.style.display = ''
+      if (pauseIcon)pauseIcon.style.display = 'none'
+      playBtn?.classList.remove('is-active')
+    }
+
+    window.timelineSpeedCycle = function() {
+      _speedIdx = (_speedIdx + 1) % SPEEDS.length
+      const label = document.getElementById('speed-display')
+      if (label) label.textContent = `${SPEEDS[_speedIdx]}×`
+      // If currently playing, restart at new speed
+      if (_playInterval) {
+        window.timelinePause()
+        window.timelinePlay()
+      }
+    }
+
+    // ── Play/pause button ─────────────────────────────────────────────────
+    document.getElementById('play-pause-btn')?.addEventListener('click', () => {
+      if (_playInterval) {
+        fireLES('timeline-controller', 'timeline:pause')
+      } else {
+        fireLES('timeline-controller', 'timeline:play')
+      }
+    })
+
+    // ── Speed cycle button ────────────────────────────────────────────────
+    document.getElementById('speed-btn')?.addEventListener('click', () => {
+      fireLES('timeline-controller', 'timeline:speed-cycle')
+    })
+
+    // ── markDataReady gate — also set _dataReady for the map fallback path
+    const _origMarkDataReady = window.markDataReady
+    window.markDataReady = function(type) {
+      _origMarkDataReady(type)
+      const { earthquakes, weather, fires } = window._readyFlags
+      if (earthquakes && weather && fires) {
+        window._dataReady = true
+        // Belt-and-suspenders: if map was ready before data, and analysis:computed
+        // hasn't fired yet (workers still pending), trigger splash exit early.
+        // In practice analysis:computed fires first; this covers edge cases.
+        if (window._mapReady && !window._splashExited && window.onPageDataReady) {
+          window._splashExited = true
+          window.onPageDataReady()
+            .catch(err => console.warn('[d3] onPageDataReady (early) error:', err))
+        }
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // END STEP 7
+    // ─────────────────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 9: Timeline presence indicators + pin mechanic + weight sliders
+    // ─────────────────────────────────────────────────────────────────────
+
+    // ── Session identity ──────────────────────────────────────────────────
+    // Stable per page-load; used to distinguish this user's own presence
+    // entry from others received via SSE.
+    const _sessionId = crypto.randomUUID()
+
+    // ── Per-user colour — derived from initials hash ──────────────────────
+    // Stable across reconnects: same initials → same hue every time.
+    function presenceColor(initials) {
+      let h = 0
+      for (const ch of initials) h = (h * 31 + ch.charCodeAt(0)) & 0xffff
+      // Avoid green (used for seismic) and orange (fire). Pick from
+      // cyan → blue → violet → pink → rose range: hue 160–340.
+      const hue = 160 + (h % 180)
+      return `oklch(0.75 0.18 ${hue})`
+    }
+
+    // ── Render presence indicators ────────────────────────────────────────
+    // Called whenever $otherUsers changes (from SSE) or the current user
+    // pins/unpins. Renders triangles + badges above the scrubber.
+    function renderPresenceIndicators(users) {
+      const container = document.getElementById('presence-indicators')
+      if (!container) return
+
+      // Remove stale entries
+      container.innerHTML = ''
+
+      for (const u of users) {
+        // Skip our own entry — we don't show ourselves on the track
+        if (u.id === _sessionId) continue
+
+        const pct = (u.hour / 167) * 100
+        const color = presenceColor(u.initials)
+
+        // Wrapper div at the correct horizontal position
+        const wrapper = document.createElement('div')
+        wrapper.style.cssText = `
+          position: absolute;
+          left: ${pct}%;
+          top: 0;
+          transform: translateX(-50%);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          pointer-events: none;
+        `
+
+        // Triangle (pointing down toward the scrubber track)
+        const tri = document.createElement('div')
+        tri.className = 'presence-triangle'
+        tri.style.color = color
+        wrapper.appendChild(tri)
+
+        // Badge circle with initials
+        const badge = document.createElement('div')
+        badge.className = 'presence-badge' + (u.pinned ? ' is-pinned' : '')
+        badge.style.color = color
+        badge.textContent = u.initials.slice(0, 2).toUpperCase()
+        badge.title = u.initials   // tooltip on hover (native browser)
+        wrapper.appendChild(badge)
+
+        container.appendChild(wrapper)
+      }
+    }
+
+    // ── SSE presence stream ───────────────────────────────────────────────
+    // Opens an EventSource to /api/d3/presence. On each event the server
+    // sends the full user array; we re-render all indicators.
+    // Only starts after the user has signed in ($userName set).
+    let _presenceSource = null
+
+    function startPresenceStream() {
+      if (_presenceSource) return
+      _presenceSource = new EventSource('/api/d3/presence')
+      _presenceSource.onmessage = e => {
+        try {
+          const users = JSON.parse(e.data)
+          renderPresenceIndicators(users)
+        } catch { /* malformed */ }
+      }
+      _presenceSource.onerror = () => {
+        // Reconnect automatically after 3s (EventSource handles this natively)
+        console.warn('[presence] SSE error — browser will retry')
+      }
+    }
+
+    // ── POST presence update ──────────────────────────────────────────────
+    // Debounced — at most once every 500ms so scrubber drags don't flood.
+    let _presenceDebounce = null
+    function syncPresence(hour, pinned, pinnedHour) {
+      clearTimeout(_presenceDebounce)
+      _presenceDebounce = setTimeout(async () => {
+        const initials = window._signedInName
+          ? window._signedInName.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
+          : '??'
+        try {
+          await fetch('/api/d3/presence', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: _sessionId, initials, hour, pinned, pinnedHour }),
+          })
+        } catch { /* offline */ }
+      }, 500)
+    }
+
+    // ── Scrubber → presence sync ──────────────────────────────────────────
+    document.getElementById('scrubber')?.addEventListener('input', e => {
+      if (!window._signedIn) return
+      const h = parseInt(e.target.value)
+      const pinned = window._isPinned ?? false
+      syncPresence(h, pinned, pinned ? h : null)
+    })
+
+    // ── Pin datetime button ───────────────────────────────────────────────
+    // Toggles $datePinned. When pinned: button turns accent colour,
+    // presence badge shows pulse animation, POST locks pinnedHour.
+    window._isPinned = false
+
+    document.getElementById('pin-datetime-btn')?.addEventListener('click', () => {
+      if (!window._signedIn) return
+      window._isPinned = !window._isPinned
+      const btn = document.getElementById('pin-datetime-btn')
+      btn?.classList.toggle('is-active', window._isPinned)
+
+      const h = parseInt(document.getElementById('scrubber')?.value ?? '0')
+      syncPresence(h, window._isPinned, window._isPinned ? h : null)
+    })
+
+    // ── Wire presence start to sign-in ────────────────────────────────────
+    // Patching the sign-in submit listener that was wired in the main block.
+    // We hook in after it to start the SSE stream and POST initial state.
+    const _origSubmitHandler = document.getElementById('signin-submit')
+      ?._listeners?.click?.[0]  // not reliable; use a flag approach instead
+    document.getElementById('signin-submit')?.addEventListener('click', () => {
+      // Start SSE stream on sign-in (user gesture already happened for autoplay)
+      setTimeout(() => {
+        if (window._signedIn) startPresenceStream()
+      }, 100)
+    })
+
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 9b: Weight slider pin mechanic
+    // Three sliders (earthquake, fire, temp) must always sum to 1.0.
+    // Pin logic:
+    //   0 pinned: moving slider A distributes delta proportionally to B & C
+    //   1 pinned: moving A distributes delta to the 2 unpinned others
+    //   2 pinned: moving A only adjusts A; the 3rd auto-adjusts to fill 1.0
+    //   3 pinned: should not happen — unpin one when all are pinned
+    //   (we prevent all-3 by auto-unpinning the last-touched when a 3rd pins)
+    // ─────────────────────────────────────────────────────────────────────
+
+    const WEIGHT_IDS   = ['eq', 'fire', 'temp']
+    const pinState     = { eq: false, fire: false, temp: false }
+    let   lastPinned   = null  // tracks which was most recently pinned
+
+    function getWeights() {
+      return Object.fromEntries(WEIGHT_IDS.map(id => [
+        id, parseFloat(document.getElementById(`w-${id}`)?.value ?? '0')
+      ]))
+    }
+
+    function setWeight(id, val) {
+      const el = document.getElementById(`w-${id}`)
+      const dv = document.getElementById(`wv-${id}`)
+      const clamped = Math.max(0, Math.min(1, val))
+      if (el) el.value = clamped
+      if (dv) dv.textContent = clamped.toFixed(2)
+    }
+
+    function updatePinVisuals() {
+      for (const id of WEIGHT_IDS) {
+        const btn = document.querySelector(`.pin-btn[data-weight="${id}"]`)
+        if (!btn) continue
+        btn.classList.toggle('is-pinned', pinState[id] === 'user')
+        btn.classList.toggle('is-system-pinned', pinState[id] === 'system')
+        btn.classList.toggle('is-pinned', pinState[id] !== false)
+        const slider = document.getElementById(`w-${id}`)
+        // Disable slider if system-pinned (auto-locked to fill remainder)
+        if (slider) slider.disabled = false  // never fully disable — allow inspection
+      }
+    }
+
+    // Called when slider `movedId` changes to `newVal`.
+    // Redistributes delta across unpinned siblings.
+    function redistributeWeights(movedId, newVal) {
+      const old     = getWeights()
+      const delta   = newVal - old[movedId]
+      const others  = WEIGHT_IDS.filter(id => id !== movedId && !pinState[id])
+
+      if (others.length === 0) {
+        // All others pinned — clamp moved slider to what's available
+        const available = WEIGHT_IDS
+          .filter(id => id !== movedId && pinState[id])
+          .reduce((s, id) => s - old[id], 1)
+        setWeight(movedId, Math.max(0, Math.min(available, newVal)))
+        return
+      }
+
+      // Proportional distribution: if others are [0.35, 0.15], and delta=-0.1,
+      // fire gets -0.07, temp gets -0.03 (proportional to their current values)
+      const totalOther = others.reduce((s, id) => s + old[id], 0)
+      setWeight(movedId, newVal)
+      for (const id of others) {
+        const share = totalOther > 0 ? old[id] / totalOther : 1 / others.length
+        setWeight(id, old[id] - delta * share)
+      }
+
+      // Normalise rounding errors — ensure sum = 1.0
+      const sum = WEIGHT_IDS.reduce((s, id) => s + parseFloat(document.getElementById(`w-${id}`)?.value ?? 0), 0)
+      if (Math.abs(sum - 1) > 0.001 && others.length > 0) {
+        const lastOther = others[others.length - 1]
+        const cur = parseFloat(document.getElementById(`w-${lastOther}`)?.value ?? 0)
+        setWeight(lastOther, cur + (1 - sum))
+      }
+    }
+
+    // Wire each weight slider
+    for (const id of WEIGHT_IDS) {
+      document.getElementById(`w-${id}`)?.addEventListener('input', e => {
+        redistributeWeights(id, parseFloat(e.target.value))
+      })
+    }
+
+    // Wire pin buttons
+    document.querySelectorAll('.pin-btn[data-weight]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.weight
+        const currentlyPinned = pinState[id] !== false
+        const pinnedCount = WEIGHT_IDS.filter(i => pinState[i] !== false).length
+
+        if (currentlyPinned) {
+          // Unpin this one
+          pinState[id] = false
+        } else {
+          // Pin this one
+          if (pinnedCount >= 2) {
+            // All 3 would be pinned — unpin the last-touched instead
+            if (lastPinned && lastPinned !== id) {
+              pinState[lastPinned] = false
+            }
+          }
+          pinState[id] = 'user'
+          lastPinned = id
+        }
+        updatePinVisuals()
+      })
+    })
+
+    // ─────────────────────────────────────────────────────────────────────
+    // END STEP 9
+    // ─────────────────────────────────────────────────────────────────────
+
+        // ── Boot: wait for custom element upgrade + layout ─────────────────
     // Strategy (most reliable — no CSS height-resolution ambiguity):
     //
     // 1. customElements.whenDefined('sandwich-layout') — ensures the grid
@@ -2269,13 +2959,17 @@
       window.mapController.pathGen    = pathGen
       console.log('[d3] mapController ready')
 
-      // [STEP3-TEMP-START] — replaced by LES in Step 7
+      // Map is ready — set flag. Splash exits via page:data-ready event
+      // once data also finishes loading (driven by LES #page-controller).
       window._mapReady = true
-      step3MaybeDismissSplash()
-      // [STEP3-TEMP-END]
+      // If data already finished before map was ready, trigger now
+      if (window._dataReady) window.exitSplash().then(() => window.enterLayersStagger())
     }
 
     bootMap().catch(err => console.error('[d3] boot failed:', err))
+
+    // Footer fallback is now triggered from sign-in (see Step 7 JS).
+    // Removed the bootMap-level timer — it fired before sign-in.
     console.log('[d3] Step 3 init — D3:', typeof d3.geoPath === 'function' ? 'loaded ✓' : 'MISSING', '| Turf:', typeof window.turf?.area === 'function' ? '7.3.4 ✓' : 'MISSING')
   </script>
 
