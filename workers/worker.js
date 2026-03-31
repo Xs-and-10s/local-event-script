@@ -52,15 +52,15 @@ function handleTempIsobands({ points, breaks, bbox }) {
       points.map(p => turf.point([p.lon, p.lat], { value: p.temp }))
     )
 
-    // Interpolate to a dense grid (50 cells) using IDW
-    const interpolated = turf.interpolate(fc, 50, {
+    // Interpolate to a dense grid using IDW
+    const interpolated = turf.interpolate(fc, 40, {
       gridType: 'point',
       property: 'value',
-      weight: 3,  // IDW power parameter
+      weight: 2,
       bbox: bbox || [-125, 24, -66, 50],
     })
 
-    // Generate isobands from the interpolated grid
+    // Generate isobands; caller sends dynamic breaks based on actual data range
     const bands = turf.isobands(interpolated, breaks || [0, 5, 10, 15, 20, 25, 30, 35], {
       zProperty: 'value',
     })
@@ -139,18 +139,20 @@ function handleSeismicIsobands({ earthquakes, bbox }) {
       ))
     )
 
-    const interpolated = turf.interpolate(fc, 40, {
+    // power=3 for tight locality — single large earthquake should dominate locally
+    const interpolated = turf.interpolate(fc, 30, {
       gridType: 'point',
       property: 'value',
-      weight: 2,
+      weight: 3,
       bbox: bbox || [-125, 24, -66, 50],
     })
 
-    const values = interpolated.features.map(f => f.properties.value).filter(Boolean)
+    const values = interpolated.features.map(f => f.properties.value).filter(v => v > 0)
     if (values.length === 0) return { type: 'FeatureCollection', features: [] }
 
     const max = Math.max(...values)
-    const breaks = Array.from({ length: 6 }, (_, i) => (i / 5) * max)
+    // Logarithmic breaks: denser at low end so faint rings appear around small events
+    const breaks = [0, max*0.05, max*0.12, max*0.25, max*0.45, max*0.70, max*0.90]
 
     return turf.isobands(interpolated, breaks, { zProperty: 'value' })
   } catch (err) {

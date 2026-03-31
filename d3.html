@@ -86,7 +86,7 @@
       height: var(--header-h);
       padding: 0 1rem;
       border-bottom: 1px solid var(--border);
-      background: color-mix(in oklch, var(--surface) 90%, transparent);
+      background: color-mix(in oklch, oklch(0.10 0.025 135) 95%, transparent); /* lime-hue tint */
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
       position: relative;
@@ -108,17 +108,24 @@
     #app-header-inner .nav-right { justify-self: end; }
 
     .nav-back {
-      color: var(--muted); text-decoration: none;
+      color: #8aad90; text-decoration: none;  /* WCAG AA: ~5.2:1 on #08100a */
       font-size: 0.8rem; display: flex; align-items: center; gap: 0.25rem;
       transition: color 0.15s;
     }
     .nav-back:hover { color: var(--text); }
 
     .brand {
-      font-size: 0.85rem; font-weight: 700;
-      letter-spacing: 0.12em; font-variant: small-caps;
+      font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 0.10em; font-variant: small-caps;
       color: var(--accent-glow);
+      white-space: nowrap;
     }
+
+    /* Multicolour title: each word echoes its data layer */
+    .brand-eq   { color: #8cf43e; }  /* electric lime — seismic */
+    .brand-sep  { color: #6a7a70; }  /* neutral grey — punctuation */
+    .brand-wind { color: #c8e8ec; }  /* pale cyan-white — wind arrows */
+    .brand-fire { color: #ff7241; }  /* fire orange — FIRE_STOPS[4] */
 
     #hamburger-btn {
       background: none; border: 1px solid var(--border); border-radius: 8px;
@@ -160,6 +167,24 @@
     }
     .map-layer { opacity: 0; }
 
+    /* ── Layer rendering styles ──────────────────────────────────────── */
+
+    /* Isoband layers */
+    #layer-temp  path { transition: opacity 0.4s ease; }
+    #layer-fire  path { transition: opacity 0.4s ease; }
+    #layer-seismic path { transition: opacity 0.4s ease; }
+
+    /* Wind arrows */
+    #layer-wind path.wind-arrow {
+      transition: opacity 0.3s ease, transform 0.6s ease;
+    }
+
+    /* Spikes */
+    #layer-spikes rect {
+      transition: height 0.5s cubic-bezier(0.34,1.56,0.64,1),
+                  opacity 0.4s ease;
+    }
+
     /* ── Map path styles ────────────────────────────────────────────── */
     /* State fills — subtle hover highlight for future interactivity */
     #layer-base path.state {
@@ -172,7 +197,8 @@
     /* Border paths are non-interactive */
     #layer-base path.state-borders,
     #layer-base path.nation-outline,
-    #layer-base path.sphere-bg {
+    #layer-base path.sphere-bg,
+    #layer-borders path {
       pointer-events: none;
     }
 
@@ -826,7 +852,7 @@
           </svg>
           demos
         </a>
-        <span class="brand" aria-label="LES demo">LES</span>
+        <span class="brand" aria-label="Living Map — Earthquakes, Wind and Fire"><span class="brand-eq">Earthquakes</span><span class="brand-sep">, </span><span class="brand-wind">Wind</span><span class="brand-sep"> &amp; </span><span class="brand-fire">Fire</span></span>
         <div class="nav-right">
           <button id="hamburger-btn" aria-label="Open settings" aria-expanded="false" aria-controls="settings-modal">
             <svg width="14" height="12" viewBox="0 0 14 12" fill="none" aria-hidden="true">
@@ -843,11 +869,19 @@
     <main>
       <div id="map-container">
         <svg id="map" aria-label="Living Map — US geospatial visualization" role="img">
+          <!-- Layer 0: ocean bg + state fills -->
           <g id="layer-base"    class="map-layer"></g>
+          <!-- Layer 1: wind vectors — context, below all data -->
           <g id="layer-wind"    class="map-layer"></g>
+          <!-- Layer 2: temperature (fill + contour strokes), clipped -->
           <g id="layer-temp"    class="map-layer"></g>
-          <g id="layer-fire"    class="map-layer" style="mix-blend-mode:screen"></g>
+          <!-- Layer 3: wildfire (fill + contour strokes), clipped -->
+          <g id="layer-fire"    class="map-layer"></g>
+          <!-- Layer 4: seismic glow rings per earthquake epicenter -->
           <g id="layer-seismic" class="map-layer"></g>
+          <!-- Layer 5: borders — above seismic rings, always legible -->
+          <g id="layer-borders" class="map-layer"></g>
+          <!-- Layer 6: spikes — top of stack, always legible -->
           <g id="layer-spikes"  class="map-layer">
             <g id="spikes-seismic"></g>
             <g id="spikes-fire"></g>
@@ -1072,42 +1106,59 @@
       projection = buildProjection(width, height)
       pathGen    = d3.geoPath(projection)
 
-      // ── Draw base layer ──────────────────────────────────────────────
+      // ── SVG defs — clipPath from nation boundary ──────────────────────
+      // All data layers (temp, fire, seismic, spikes) are clipped to CONUS.
+      // Wind stays unclipped — showing wind over the ocean is intentional.
+      const svgDefs = d3.select(mapSVG).append('defs')
+      // Exclude Alaska (id=2) and Hawaii (id=15) from clip so their insets
+      // don't receive temperature/seismic data that bleeds in from CONUS edges.
+      const conus48Geoms = us.objects.states.geometries.filter(d => d.id !== 2 && d.id !== 15)
+      svgDefs.append('clipPath').attr('id', 'clip-conus')
+        .append('path')
+        .datum(topojson.merge(us, conus48Geoms))
+        .attr('d', pathGen)
+
+      // ── Layer: base — ocean bg + state fills ONLY (no borders) ──────
       const base = d3.select(layerBase)
 
-      // Nation fill (ocean-colored background within US bounds — subtle)
-      base.append('path')
-        .datum({ type: 'Sphere' })
-        .attr('class', 'sphere-bg')
-        .attr('d', pathGen)
-        .attr('fill', 'none')  // transparent — bg color shows through
+      // Ocean: near-black rect, fills entire SVG behind everything
+      base.append('rect')
+        .attr('class', 'ocean-bg')
+        .attr('x', -9999).attr('y', -9999)
+        .attr('width', 99999).attr('height', 99999)
+        .attr('fill', 'var(--bg, #08100a)')
 
-      // State fills
+      // State fills — barely lighter than ocean so data pops
       base.selectAll('path.state')
         .data(stateFeatures.features)
         .join('path')
           .attr('class', 'state')
           .attr('d', pathGen)
-          .attr('fill', 'var(--map-state-fill, #192e1e)')
+          .attr('fill', 'var(--map-state-fill, #131514)')
           .attr('stroke', 'none')
 
-      // State border mesh (internal borders)
-      base.append('path')
+      // ── Layer: borders — drawn ABOVE data fills ───────────────────────
+      // Placed in #layer-borders which sits above temp+fire in z-order.
+      // This keeps state lines sharp and geographically readable regardless
+      // of how opaque the temperature/fire isoband wash is.
+      const borders = d3.select('#layer-borders')
+      borders.style('opacity', '1')  // always visible
+
+      borders.append('path')
         .datum(stateMesh)
         .attr('class', 'state-borders')
         .attr('d', pathGen)
         .attr('fill', 'none')
-        .attr('stroke', 'var(--map-border, #1e3828)')
-        .attr('stroke-width', 0.5)
+        .attr('stroke', '#404845')  /* medium grey — legible through all data layers */
+        .attr('stroke-width', 0.75)
 
-      // Nation outline (outer border, slightly brighter)
-      base.append('path')
+      borders.append('path')
         .datum(nationMesh)
         .attr('class', 'nation-outline')
         .attr('d', pathGen)
         .attr('fill', 'none')
-        .attr('stroke', 'var(--map-nation-border, #2a4a34)')
-        .attr('stroke-width', 1.2)
+        .attr('stroke', '#6a7874')  /* bright grey — nation outline punches through */
+        .attr('stroke-width', 1.4)
 
       // ── Zoom behavior ────────────────────────────────────────────────
       // All map layers live in the SVG root; we apply the zoom transform
@@ -1116,9 +1167,11 @@
       // we use a top-level zoom container group created at init time.
       const zoomRoot = d3.select(mapSVG).insert('g', ':first-child').attr('id', 'zoom-root')
 
-      // Move all existing layer groups into zoom-root
+      // Move layer groups into zoom-root IN Z-ORDER (first = bottom).
+      // Wind goes BEFORE data fills so it reads as context, not data.
+      // Borders go ABOVE data fills so they stay crisp.
       ;['layer-base','layer-wind','layer-temp','layer-fire',
-        'layer-seismic','layer-spikes'].forEach(id => {
+        'layer-seismic','layer-borders','layer-spikes'].forEach(id => {
         zoomRoot.node().appendChild(document.getElementById(id))
       })
 
@@ -1131,7 +1184,12 @@
 
       d3.select(mapSVG).call(zoomBehavior)
 
-      // ── Expose cached data for later steps ──────────────────────────
+      // ── Apply clipPath to data layers (not wind, not base) ───────────
+      ;['layer-temp','layer-fire','layer-seismic','layer-spikes'].forEach(id => {
+        document.getElementById(id)?.setAttribute('clip-path', 'url(#clip-conus)')
+      })
+
+      // ── Expose cached data for later steps ───────────────────────────
       window._mapData = { us, stateFeatures, stateMesh, nationMesh }
 
       // ── Make base layer visible using inline style (beats CSS class rule)
@@ -1163,13 +1221,10 @@
           projection = buildProjection(width, height)
           pathGen    = d3.geoPath(projection)
 
-          // Re-render all path elements that depend on the projection
-          d3.selectAll('#layer-base path').attr('d', pathGen)
-
-          // Future layers (wind triangles, spikes) will also call pathGen
-          // via window.mapController.reprojectLayer() in later steps.
+          // Re-project all rendered layers
           window.mapController.projection = projection
           window.mapController.pathGen    = pathGen
+          window.mapController.reprojectAll?.()
 
           console.log('[d3] resize →', Math.round(width), '×', Math.round(height))
         }, 100)
@@ -1264,15 +1319,86 @@
         return currentTransform
       },
 
-      // ── Re-projection (called by resize handler) ─────────────────────
-      reprojectLayer(/* name */) {
-        // Implemented per-layer as they're built in Steps 6–7
-        // Base layer is handled directly in the resize observer above
+      // ── Re-projection — called by resize handler ──────────────────────
+      reprojectLayer(name) {
+        switch (name) {
+          case 'base':
+            d3.selectAll('#layer-base path').attr('d', pathGen)
+            break
+          case 'borders':
+            d3.selectAll('#layer-borders path').attr('d', pathGen)
+            break
+          case 'temp': {
+            // Choropleth: re-project state paths (same as base layer)
+            d3.selectAll('#layer-temp path.choro-temp').attr('d', pathGen)
+            break
+          }
+          case 'fire':
+            // d3.contourDensity output is in screen-space pixels, not geographic coords.
+            // On resize the projection changes so we must REDRAW from scratch.
+            if (window._data?.fires) drawFireLayer(window._data.fires)
+            break
+          case 'seismic':
+            // Per-earthquake circles: update cx/cy from new projection
+            ;[0,1,2,3].forEach(ri => {
+              d3.selectAll(`#layer-seismic circle.seismic-ring-${ri}`)
+                .attr('cx', d => { const p=projection([d.lon,d.lat]); return p?p[0]:-9999 })
+                .attr('cy', d => { const p=projection([d.lon,d.lat]); return p?p[1]:-9999 })
+            })
+            break
+          case 'wind':
+            // Re-run drawWindLayer — transforms recalculate from projection
+            if (window._data?.weather) drawWindLayer(0)
+            break
+          case 'spikes': {
+            // Re-project spike x/y from stored projection
+            const agg = window._results?.['aggregation:state']
+            if (agg) {
+              for (const cls of ['spike-eq','spike-fire','spike-temp']) {
+                d3.selectAll(`rect.${cls}`)
+                  .attr('x', d => {
+                    const p = window.mapController.projection?.([d.lon, d.lat])
+                    return p ? p[0] - 1 : 0
+                  })
+                  .attr('y', d => {
+                    const p = window.mapController.projection?.([d.lon, d.lat])
+                    if (!p) return 0
+                    // Height comes from the element's own height attribute
+                    const el = d3.select(this)
+                    return p[1] - parseFloat(el.attr('height') || 0)
+                  })
+              }
+            }
+            break
+          }
+        }
       },
 
-      // ── Stubs — filled in Steps 6–9 ─────────────────────────────────
-      redrawLayer(/* name */) { return Promise.resolve() },
-      computePOIScore(/* earthquakes, fires, weather */) { return null },
+      reprojectAll() {
+        const c48 = window._mapData.us.objects.states.geometries.filter(d => d.id !== 2 && d.id !== 15)
+        d3.select('#clip-conus path')
+          .datum(topojson.merge(window._mapData.us, c48))
+          .attr('d', pathGen)
+        for (const name of ['base','wind','temp','fire','seismic','borders','spikes']) {
+          this.reprojectLayer(name)
+        }
+      },
+
+      redrawLayer(name) {
+        const r = window._results || {}
+        switch (name) {
+          case 'temp':    break  // choropleth drawn from aggregation:state, not isobands
+          case 'fire':    if (r['isobands:fire'])    drawFireLayer(r['isobands:fire']);    break
+          case 'seismic': break  // seismic now drawn per-epicentre, not via worker isobands
+          case 'wind':    drawWindLayer(0); break
+          case 'spikes':  if (r['aggregation:state']) drawSpikesLayer(r['aggregation:state'], 0); break
+        }
+        return Promise.resolve()
+      },
+
+      computePOIScore(weights) {
+        return computeCONUSPOI(window._results?.['scoring:poi'], weights)
+      },
     }
 
     // Attach live references after first render
@@ -1303,19 +1429,532 @@
     const initialWorkerCount = Math.min(8, Math.max(2, (navigator.hardwareConcurrency || 4) - 1))
     window.workerPool = createWorkerPool(initialWorkerCount)
 
-    // Listen for analysis results broadcast by #worker-controller LES.
-    // The map controller (Step 6) will act on these; registered here
-    // early so we don't miss any results.
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 6: D3 Layer Rendering
+    // Each worker result is routed to its dedicated draw function.
+    // Layers use OKLCH color scales throughout (perceptually uniform).
+    // All paths are re-projected on resize via reprojectLayer().
+    // ─────────────────────────────────────────────────────────────────────
+
+    // ── CONUS bounding box ────────────────────────────────────────────────
+    // Used to filter POIs and clamp isoband features to the visible area.
+    const CONUS_BBOX = { west: -125, east: -66, south: 24, north: 50 }
+
+    function inCONUS(lon, lat) {
+      return lon >= CONUS_BBOX.west && lon <= CONUS_BBOX.east &&
+             lat >= CONUS_BBOX.south && lat <= CONUS_BBOX.north
+    }
+
+    // ── Color scales — pre-computed OKLCH hex stops ───────────────────────
+    // d3.oklch() is not available on the jsDelivr /+esm tree-shaken bundle.
+    // Colours were computed offline from the same OKLCH parameters and
+    // hardcoded as hex arrays. Index lookups replace interpolation calls.
+
+    // Temperature: muted steel blue → warm neutral → soft coral (10 stops)
+    // Low chroma so it never fights fire's saturated orange-red.
+    // oklch: L 0.40→0.78, C 0.08→0.05, H 240→25
+    const TEMP_STOPS = [
+      '#2a4a6a',  // coldest  — muted steel blue
+      '#345a78',
+      '#3f6b83',
+      '#4d7d8a',
+      '#608f8c',
+      '#7b9e87',
+      '#99ab7e',
+      '#bab472',
+      '#d6b86b',
+      '#e8b06a',  // hottest  — soft warm coral (not red, not orange)
+    ]
+    // Fire: amber (#db6d00) → red-orange (#ff7241), 5 stops
+    const FIRE_STOPS = [
+      '#db6d00','#f26f00','#ff7100','#ff721b','#ff7241',
+    ]
+    // Seismic: dim lime (#437224) → electric lime (#8cf43e), 5 stops
+    const SEISMIC_STOPS = [
+      '#437224','#55902b','#67b031','#79d137','#8cf43e',
+    ]
+
+    const tempColorScale    = i => TEMP_STOPS[Math.max(0, Math.min(9, Math.round(i)))]
+    const fireColorScale    = i => FIRE_STOPS[Math.max(0, Math.min(4, Math.round(i)))]
+    const seismicColorScale = i => SEISMIC_STOPS[Math.max(0, Math.min(4, Math.round(i)))]
+
+    // ── Layer draw functions ───────────────────────────────────────────────
+
+    /**
+     * drawTempLayer — state choropleth (Option A).
+     *
+     * Each US state is filled with the temperature colour mapped to its
+     * median temperature from the aggregation:state worker result.
+     * This is immediately legible (choropleth idiom is universally understood),
+     * uses data already computed, never bleeds into ocean, and works at
+     * any zoom level.
+     *
+     * @param {Array} stateTemp — [{stateId, lon, lat, temp}] from aggregation:state
+     */
+    function drawTempLayer(stateTemp) {
+      if (!stateTemp || !stateTemp.length) return
+      const stateFeatures = window._mapData?.stateFeatures
+      if (!stateFeatures) return
+
+      // Build a lookup: stateId → temperature
+      const tempById = new Map(stateTemp.map(s => [s.stateId, s.temp]))
+
+      // Compute the actual data range for colour mapping
+      const temps  = stateTemp.map(s => s.temp)
+      const tMin   = Math.min(...temps)
+      const tMax   = Math.max(...temps)
+      const tSpan  = Math.max(1, tMax - tMin)
+
+      const colorForState = feat => {
+        const name = feat.properties?.name ?? String(feat.id)
+        const temp = tempById.get(name)
+        if (temp == null) return null
+        const t = Math.max(0, Math.min(1, (temp - tMin) / tSpan))
+        return TEMP_STOPS[Math.round(t * 9)]
+      }
+
+      const sel = d3.select('#layer-temp')
+
+      sel.selectAll('path.choro-temp')
+        .data(stateFeatures.features, d => d.id)
+        .join(
+          enter => enter.append('path').attr('class', 'choro-temp')
+            .attr('fill-opacity', 0),
+          update => update,
+          exit => exit.remove()
+        )
+        .attr('d', pathGen)
+        .attr('fill', d => colorForState(d) ?? 'none')
+        .attr('stroke', 'none')
+        .transition().duration(900).ease(d3.easeQuadOut)
+        // Low opacity: temperature is background context, not primary signal
+        .attr('fill-opacity', d => colorForState(d) ? 0.22 : 0)
+
+      sel.style('opacity', '1')
+    }
+
+    /**
+     * drawFireLayer — wildfire density contours via d3.contourDensity().
+     *
+     * IDW interpolation is wrong for fire data: it fills the entire bbox
+     * with non-zero values because every location receives weighted influence
+     * from distant hotspots. Fire is a POINT EVENT — empty space should read
+     * as empty.
+     *
+     * d3.contourDensity() works in screen-space (projected pixels) and only
+     * produces contour rings where hotspots actually cluster. Tuning:
+     *   bandwidth — controls how far a hotspot's influence spreads (pixels).
+     *     Too wide: smears into continental wash. Too tight: every point
+     *     gets its own tiny ring. ~18px is right for CONUS at this zoom.
+     *   thresholds — we want ~5 levels, each roughly doubling density.
+     *     Computed from the observed max density value so the top ring
+     *     always marks the most intense cluster.
+     *
+     * Strokes only, no fill. Same visual language as seismic and temp.
+     * FRP (fire radiative power) is used as a weight so high-intensity
+     * fires generate stronger density signal than smoldering ones.
+     */
+    function drawFireLayer(fires) {
+      if (!fires || fires.length === 0) return
+
+      // Only plot fires within CONUS (filter out any stray global detections)
+      const pts = fires.filter(f => inCONUS(f.lon, f.lat))
+      if (pts.length === 0) return
+
+      // Project fire coordinates to SVG screen pixels
+      const { width, height } = mapContainer.getBoundingClientRect()
+      const projected = pts
+        .map(f => {
+          const p = projection([f.lon, f.lat])
+          return p ? { x: p[0], y: p[1], weight: Math.log1p(f.frp || 1) } : null
+        })
+        .filter(Boolean)
+
+      if (projected.length < 3) return
+
+      // d3.contourDensity — screen-space KDE
+      // bandwidth: ~18px at the base zoom produces tight, local clusters
+      const density = d3.contourDensity()
+        .x(d => d.x)
+        .y(d => d.y)
+        .weight(d => d.weight)
+        .size([width, height])
+        .bandwidth(18)
+        .thresholds(8)  // number of contour levels; d3 picks values automatically
+
+      const contours = density(projected)
+      if (!contours.length) return
+
+      // Dynamic thresholds: keep only the top half of contour levels
+      // (bottom half is very sparse, wide rings that add noise)
+      const topContours = contours.slice(Math.floor(contours.length / 2))
+      const n = topContours.length
+
+      // contourDensity produces GeoJSON polygons in SCREEN coordinates,
+      // so we use an identity transform (not pathGen) for rendering
+      const identityPath = d3.geoPath()
+
+      const sel = d3.select('#layer-fire')
+      sel.selectAll('path.contour-fire')
+        .data(topContours, (d, i) => i)
+        .join(
+          enter => enter.append('path').attr('class', 'contour-fire')
+            .attr('stroke-opacity', 0),
+          update => update,
+          exit => exit.transition().duration(300).attr('stroke-opacity', 0).remove()
+        )
+        .attr('d', identityPath)
+        .attr('fill', (d, i) => FIRE_STOPS[Math.min(4, Math.round((i / Math.max(1, n - 1)) * 4))])
+        .attr('stroke', (d, i) => FIRE_STOPS[Math.min(4, Math.round((i / Math.max(1, n - 1)) * 4))])
+        // Thinner than seismic (1.8px max) — fire is supporting context
+        .attr('stroke-width', (d, i) => 0.4 + (i / Math.max(1, n - 1)) * 1.4)
+        .transition().duration(800).ease(d3.easeQuadOut)
+        // Fill: near-invisible outer, max 0.10 inner — just a warm glow hint
+        .attr('fill-opacity', (d, i) => Math.pow(i / Math.max(1, n - 1), 1.8) * 0.38)
+        .attr('stroke-opacity', (d, i) => 0.08 + Math.pow(i / Math.max(1, n - 1), 0.9) * 0.75)
+
+      sel.style('opacity', '1')
+    }
+
+    /**
+     * drawSeismicLayer — per-earthquake concentric glow rings.
+     *
+     * Replaces IDW isobands (which blended earthquakes into a continental
+     * smear) with explicit SVG circles centred on each epicentre.
+     * Every earthquake in CONUS guaranteed its own 4 rings.
+     *
+     * Ring visual hierarchy (innermost → outermost):
+     *   - SEISMIC_STOPS[4] electric lime, stroke-width 2.8px, opacity 0.90
+     *   - SEISMIC_STOPS[3]               stroke-width 1.8px, opacity 0.60
+     *   - SEISMIC_STOPS[2]               stroke-width 1.0px, opacity 0.30
+     *   - SEISMIC_STOPS[1] dim lime,     stroke-width 0.5px, opacity 0.12
+     *
+     * Radius scales with magnitude so M7 rings are dramatically larger than M5.
+     * A magnitude unit = radius multiplier of 1.6× (geometric, not linear).
+     */
+    function drawSeismicLayer() {
+      const eqs = (window._data.earthquakes || []).filter(eq => inCONUS(eq.lon, eq.lat))
+      if (!eqs.length) return
+
+      const RINGS = [
+        { rScale: 1.00, color: SEISMIC_STOPS[4], width: 2.8, opacity: 0.90 },  // innermost
+        { rScale: 1.80, color: SEISMIC_STOPS[3], width: 1.8, opacity: 0.60 },
+        { rScale: 3.20, color: SEISMIC_STOPS[2], width: 1.0, opacity: 0.30 },
+        { rScale: 5.50, color: SEISMIC_STOPS[1], width: 0.5, opacity: 0.12 },  // outermost
+      ]
+
+      // Base radius in screen pixels at M5 reference magnitude
+      const baseR = 7
+      const magRadius = mag => baseR * Math.pow(1.6, Math.max(0, mag - 3))
+
+      const sel = d3.select('#layer-seismic')
+
+      RINGS.forEach((ring, ri) => {
+        sel.selectAll(`circle.seismic-ring-${ri}`)
+          .data(eqs, d => `seismic-${ri}-${d.lon},${d.lat}`)
+          .join(
+            enter => enter.append('circle')
+              .attr('class', `seismic-ring-${ri}`)
+              .attr('fill', 'none')
+              .attr('stroke', ring.color)
+              .attr('stroke-width', ring.width)
+              .attr('r', 0)
+              .attr('opacity', 0),
+            update => update,
+            exit => exit.transition().duration(300).attr('opacity', 0).remove()
+          )
+          .attr('cx', d => { const p = projection([d.lon, d.lat]); return p ? p[0] : -9999 })
+          .attr('cy', d => { const p = projection([d.lon, d.lat]); return p ? p[1] : -9999 })
+          .transition()
+          .delay(ri * 80)  // stagger rings outward for a ripple entrance
+          .duration(700)
+          .ease(d3.easeBackOut.overshoot(0.8))
+          .attr('r', d => magRadius(d.mag) * ring.rScale)
+          .attr('opacity', ring.opacity)
+      })
+
+      sel.style('opacity', '1')
+    }
+
+    /**
+     * drawWindLayer — dense vector field via client-side IDW interpolation.
+     *
+     * 29 weather grid points are IDW-interpolated to a ~50×32 regular grid
+     * covering CONUS, giving ~1600 arrows vs 29 sparse originals.
+     * Each arrow is a 3-line chevron group. Opacity & scale ∝ wind speed.
+     * Wind layer is NOT clipped to CONUS — showing oceanic flow is intentional.
+     *
+     * Following the D3 vector field pattern: uniform grid, vary opacity/size only.
+     */
+    function drawWindLayer(hourIndex) {
+      const h = hourIndex || 0
+      const src = (window._data.weather || [])
+        .map(p => ({
+          lon:   p.lon,
+          lat:   p.lat,
+          speed: p.hourly?.windSpeed?.[h] ?? 0,
+          dir:   p.hourly?.windDir?.[h]   ?? 0,
+        }))
+        .filter(p => p.speed > 0)
+
+      if (src.length < 3) return
+
+      // ── IDW interpolation to dense grid ──────────────────────────────
+      // CONUS grid: lon -125→-65, lat 24→50
+      const GRID_W = 30, GRID_H = 20
+      const LON0 = -125, LON1 = -65, LAT0 = 24, LAT1 = 50
+      const POWER = 2  // IDW power
+
+      function idw(lon, lat, prop) {
+        let num = 0, den = 0
+        for (const p of src) {
+          const d2 = (p.lon - lon) ** 2 + (p.lat - lat) ** 2
+          if (d2 < 1e-6) return p[prop]
+          const w = 1 / d2 ** POWER
+          num += w * p[prop]
+          den += w
+        }
+        return den > 0 ? num / den : 0
+      }
+
+      // For direction we must interpolate u/v components, not the angle directly
+      const grid = []
+      for (let iy = 0; iy < GRID_H; iy++) {
+        for (let ix = 0; ix < GRID_W; ix++) {
+          const lon = LON0 + (ix / (GRID_W - 1)) * (LON1 - LON0)
+          const lat = LAT0 + (iy / (GRID_H - 1)) * (LAT1 - LAT0)
+          const speed = idw(lon, lat, 'speed')
+          // Decompose direction into u/v, interpolate, recompose
+          const us = src.map(p => ({ ...p, u: p.speed * Math.sin(p.dir * Math.PI / 180) }))
+          const vs = src.map(p => ({ ...p, v: p.speed * Math.cos(p.dir * Math.PI / 180) }))
+          let uNum = 0, vNum = 0, uvDen = 0
+          for (const p of src) {
+            const d2 = (p.lon - lon) ** 2 + (p.lat - lat) ** 2
+            if (d2 < 1e-6) { uNum = p.speed * Math.sin(p.dir * Math.PI / 180); vNum = p.speed * Math.cos(p.dir * Math.PI / 180); uvDen = 1; break }
+            const w = 1 / d2 ** POWER
+            uNum += w * p.speed * Math.sin(p.dir * Math.PI / 180)
+            vNum += w * p.speed * Math.cos(p.dir * Math.PI / 180)
+            uvDen += w
+          }
+          const u = uvDen > 0 ? uNum / uvDen : 0
+          const v = uvDen > 0 ? vNum / uvDen : 0
+          const dir = Math.atan2(u, v) * 180 / Math.PI
+          grid.push({ lon, lat, speed, dir })
+        }
+      }
+
+      const maxSpeed = Math.max(...grid.map(p => p.speed), 0.1)
+      const sel = d3.select('#layer-wind')
+
+      // Wind arrow colour: dim teal (calm) → near-white (strong).
+      // Interpolate in perceptual Lab space: #4a6e78 → #e8f6f8
+      // r: 74→232, g: 110→246, b: 120→248
+      const windColour = norm => {
+        const r = Math.round(74  + norm * 126)  // → 200 (#c8e8ec red)
+        const g = Math.round(110 + norm * 122)  // → 232
+        const b = Math.round(120 + norm * 116)  // → 236
+        return `rgb(${r},${g},${b})`
+      }
+
+      sel.selectAll('g.wind-pt')
+        .data(grid, p => `${p.lon.toFixed(2)},${p.lat.toFixed(2)}`)
+        .join(
+          enter => {
+            const g = enter.append('g').attr('class', 'wind-pt').style('opacity', 0)
+            // Shaft + arrowhead lines — colour set below after join
+            g.append('line').attr('class', 'ws')
+              .attr('x1', 0).attr('y1', 4).attr('x2', 0).attr('y2', -4)
+              .attr('stroke-width', 0.8)
+            g.append('line').attr('class', 'wl')
+              .attr('x1', -2.5).attr('y1', -1.5).attr('x2', 0).attr('y2', -5)
+              .attr('stroke-width', 0.8)
+            g.append('line').attr('class', 'wr')
+              .attr('x1', 2.5).attr('y1', -1.5).attr('x2', 0).attr('y2', -5)
+              .attr('stroke-width', 0.8)
+            return g
+          },
+          update => update,
+          exit => exit.remove()
+        )
+        // Update stroke colour on all lines within each group
+        .each(function(p) {
+          const norm = p.speed / maxSpeed
+          const col  = windColour(norm)
+          d3.select(this).selectAll('line').attr('stroke', col)
+        })
+        .attr('transform', p => {
+          const proj = projection([p.lon, p.lat])
+          if (!proj) return 'translate(-9999,-9999)'
+          const [x, y] = proj
+          const norm = p.speed / maxSpeed
+          const sc = 0.35 + norm * 0.65
+          return `translate(${x},${y}) rotate(${p.dir}) scale(${sc})`
+        })
+        .transition().duration(600)
+        .style('opacity', p => 0.08 + (p.speed / maxSpeed) * 0.52)
+
+      sel.style('opacity', '1')
+    }
+
+    /**
+     * drawSpikesLayer — three visually distinct spike columns.
+     *
+     * Earthquake (4px lime, centred):   rare events, tall, most prominent.
+     * Fire       (3px orange, +4px R):  per-state FRP sum, log-scaled.
+     * Temperature(2px blue-yel, -4px L): per-state median, linear scale.
+     *
+     * Lateral offsets separate the three types at shared centroids.
+     */
+    function drawSpikesLayer(aggregation, hourIndex) {
+      // Only earthquake spikes are shown. Fire and temperature data are
+      // communicated through their dedicated contour/density layers.
+      // A single spike type keeps the map unambiguous — viewers immediately
+      // understand that vertical marks = seismic events.
+
+      const eqs    = (window._data.earthquakes || []).filter(eq => inCONUS(eq.lon, eq.lat))
+      const maxMag = eqs.length ? Math.max(...eqs.map(e => e.mag)) : 9
+      // Quadratic height: M5→small, M7→dramatic — same as D3 spike map
+      const eqH = mag => {
+        const norm = Math.max(0, mag - 3) / Math.max(1, maxMag - 3)
+        return 8 + norm * norm * 62
+      }
+
+      // Epicentre dot — solid, bright, anchors the spike to the ground
+      d3.select('#spikes-seismic').selectAll('circle.spike-dot')
+        .data(eqs, d => `dot-${d.lon},${d.lat}`)
+        .join(
+          enter => enter.append('circle').attr('class','spike-dot').attr('r', 2.8),
+          update => update,
+          exit   => exit.remove()
+        )
+        .attr('fill', SEISMIC_STOPS[4])
+        .attr('stroke', 'none')
+        .attr('cx', d => { const p = projection([d.lon,d.lat]); return p ? p[0] : -9999 })
+        .attr('cy', d => { const p = projection([d.lon,d.lat]); return p ? p[1] : -9999 })
+        .attr('opacity', 0.95)
+
+      // Triangular spike — D3 spike-map idiom (M-w,y L0,y-h Lw,y)
+      const eqPath = d => {
+        const p = projection([d.lon, d.lat])
+        if (!p) return ''
+        const h = eqH(d.mag), w = 3.5
+        return `M${p[0]-w},${p[1]} L${p[0]},${p[1]-h} L${p[0]+w},${p[1]}`
+      }
+      d3.select('#spikes-seismic').selectAll('path.spike-eq')
+        .data(eqs, d => `eq-${d.lon},${d.lat}`)
+        .join(
+          enter => enter.append('path').attr('class','spike-eq').style('opacity', 0),
+          update => update,
+          exit   => exit.transition().duration(300).style('opacity', 0).remove()
+        )
+        .attr('fill', d => SEISMIC_STOPS[Math.min(4,
+          Math.round(Math.max(0, d.mag-3) / Math.max(1, maxMag-3) * 4))])
+        .attr('stroke', SEISMIC_STOPS[3])
+        .attr('stroke-width', 0.5)
+        .attr('d', eqPath)
+        .transition().duration(700).ease(d3.easeBackOut.overshoot(1.8))
+        // Opacity 0.45–0.70 — present but not overwhelming
+        .style('opacity', d => 0.45 + (Math.max(0,d.mag-3)/Math.max(1,maxMag-3)) * 0.25)
+
+      // Clear fire and temp spike groups in case they have stale data
+      d3.select('#spikes-fire').selectAll('*').remove()
+      d3.select('#spikes-temp').selectAll('*').remove()
+
+      d3.select('#layer-spikes').style('opacity', '1')
+    }
+
+    // ── CONUS-filtered POI score ──────────────────────────────────────────
+    // The worker's scoring:poi result may be outside CONUS (global USGS data).
+    // Re-rank filtering to CONUS-only candidates from stored data.
+    function computeCONUSPOI(scoringResult, weights) {
+      const w = weights || { eq: 0.5, fire: 0.35, temp: 0.15 }
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+
+      const candidates = []
+
+      // Earthquakes within CONUS
+      for (const eq of (window._data.earthquakes || [])) {
+        if (!inCONUS(eq.lon, eq.lat)) continue
+        const score = w.eq * clamp((eq.mag - 3) / 6, 0, 1)
+        candidates.push({ lon: eq.lon, lat: eq.lat, score, type: 'earthquake', mag: eq.mag })
+      }
+
+      // Fire state centroids (already CONUS)
+      const agg = window._results?.['aggregation:state']
+      const frpMax = Math.max(1, ...(agg?.stateFire?.map(s => s.frp) || []))
+      for (const s of (agg?.stateFire || [])) {
+        if (!s.frp) continue
+        const score = w.fire * clamp(s.frp / frpMax, 0, 1)
+        candidates.push({ lon: s.lon, lat: s.lat, score, type: 'fire' })
+      }
+
+      // Temp state centroids (already CONUS)
+      const tMin = Math.min(...(agg?.stateTemp?.map(s => s.temp) || [0]))
+      const tMax = Math.max(...(agg?.stateTemp?.map(s => s.temp) || [40]))
+      for (const s of (agg?.stateTemp || [])) {
+        if (s.temp == null) continue
+        const score = w.temp * clamp((s.temp - tMin) / Math.max(1, tMax - tMin), 0, 1)
+        candidates.push({ lon: s.lon, lat: s.lat, score, type: 'temperature' })
+      }
+
+      if (!candidates.length) return null
+      return candidates.reduce((best, c) => c.score > best.score ? c : best, candidates[0])
+    }
+
+    // ── Master workers:result router ──────────────────────────────────────
     document.addEventListener('workers:result', (e) => {
       const [task, resultJson] = e.detail?.payload || []
       if (!task) return
+
       let result
       try { result = typeof resultJson === 'string' ? JSON.parse(resultJson) : resultJson }
       catch { return }
-      console.log('[d3] worker result:', task, Array.isArray(result?.features)
-        ? `${result.features.length} features`
-        : result)
-      // Step 6 will replace this log with real layer re-draws
+
+      // Store for cross-task access (POI scoring needs aggregation data)
+      if (!window._results) window._results = {}
+      window._results[task] = result
+
+      const h = 0  // Step 7 wires this to $currentHour; use 0 for now
+
+      switch (task) {
+        case 'isobands:temp':
+          break  // choropleth; no longer uses isoband result
+
+        case 'isobands:fire':
+          // isobands:fire result is no longer used — fire layer now uses
+          // d3.contourDensity() on the raw hotspot points (see below).
+          break
+
+        case 'isobands:seismic':
+          if (result?.features?.length) drawSeismicLayer(result)
+          break
+
+        case 'aggregation:state': {
+          // Temperature choropleth — drawn first (lowest data layer)
+          if (result.stateTemp?.length) drawTempLayer(result.stateTemp)
+          drawSpikesLayer(result, h)
+          drawWindLayer(h)
+          if (window._data?.fires?.length) drawFireLayer(window._data.fires)
+          drawSeismicLayer()
+          break
+        }
+
+        case 'scoring:poi': {
+          // Re-compute CONUS-filtered POI and log it
+          const poi = computeCONUSPOI(result)
+          if (poi) {
+            console.log(`[d3] top CONUS POI: ${poi.type} @ ${poi.lon.toFixed(2)},${poi.lat.toFixed(2)} score=${poi.score.toFixed(3)}`)
+          }
+          break
+        }
+      }
+
+      const featureCount = Array.isArray(result?.features)
+        ? result.features.length
+        : (typeof result === 'object' && result !== null
+            ? Object.values(result)[0]?.length ?? '—'
+            : '—')
+      console.log(`[d3] ← ${task}: ${featureCount}`)
     })
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1514,17 +2153,20 @@
 
       // Dispatch all five worker tasks in parallel
       if (window.workerPool) {
-        window.workerPool.dispatch('isobands:temp', {
-          points: wxSlice, breaks: [-10,-5,0,5,10,15,20,25,30,35], bbox
-        }).catch(e => console.warn('[d3] isobands:temp failed:', e.message))
+        // Temperature choropleth is drawn from aggregation:state data — no worker dispatch needed.
+        // isobands:temp worker call removed (Option A: state choropleth).
 
-        window.workerPool.dispatch('isobands:fire', {
-          fires, bbox
-        }).catch(e => console.warn('[d3] isobands:fire failed:', e.message))
+        // Fire: draw contourDensity directly on client — no worker needed.
+        // This must happen AFTER the map projection exists (initMap complete).
+        if (window._data.fires?.length) {
+          drawFireLayer(window._data.fires)
+        }
+        // Still dispatch to worker for aggregation (stateFire uses raw points)
+        // but the isobands:fire result is discarded — worker still needed for state FRP.
 
-        window.workerPool.dispatch('isobands:seismic', {
-          earthquakes: eqs, bbox
-        }).catch(e => console.warn('[d3] isobands:seismic failed:', e.message))
+        // Seismic rings now rendered client-side (per-epicentre circles).
+        // No worker dispatch needed — draw immediately if map is ready.
+        if (window._mapReady) drawSeismicLayer()
 
         if (stateFeatures) {
           window.workerPool.dispatch('aggregation:state', {
@@ -1567,8 +2209,8 @@
       console.log(`[d3] ← ${task}: ${featureCount}`)
 
       // When all five tasks have at least one result, analysis is computed
-      const EXPECTED = ['isobands:temp','isobands:fire','isobands:seismic',
-                        'aggregation:state','scoring:poi']
+      // temp + fire + seismic all rendered client-side; only aggregation needs workers
+      const EXPECTED = ['aggregation:state','scoring:poi']
       const have = EXPECTED.filter(t => window._results[t] !== undefined)
       if (have.length === EXPECTED.length) {
         // All results in — fire analysis:computed once per full round
