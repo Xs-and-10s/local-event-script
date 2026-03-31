@@ -9,7 +9,10 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { config } from 'node:process'
 
-// Load .env if present (Node 20.6+ supports --env-file; this is a manual fallback)
+// Load .env manually as a fallback for when --env-file is not passed.
+// When using `npm run dev:server` the --env-file=.env flag handles this
+// before any module code runs (avoiding ESM import-hoisting issues).
+// This block covers direct `node src/index.ts` invocations.
 try {
   const { readFileSync } = await import('node:fs')
   const envPath = new URL('../.env', import.meta.url)
@@ -21,7 +24,8 @@ try {
     if (eqIdx < 0) continue
     const key = trimmed.slice(0, eqIdx).trim()
     const val = trimmed.slice(eqIdx + 1).trim()
-    if (key && !(key in process.env)) {
+    // Only set if not already set AND value is non-empty
+    if (key && val && !(key in process.env)) {
       process.env[key] = val
     }
   }

@@ -513,7 +513,12 @@
     `"></on-event>
   </local-event-script>
 
-  <!-- Page-level load sequence and splash exit -->
+  <!--
+    Page-level sequencer.
+    LES handles event routing (broadcast). The all-ready gate and
+    signal mutation live in JS (window.markDataReady) to avoid the
+    LES parser's "unknown statement" error on bare signal assignment.
+  -->
   <local-event-script
     id="page-controller"
     data-signals:dataState="'loading'"
@@ -523,7 +528,30 @@
     data-signals:settingsOpen="false"
     data-signals:audioPlaying="false"
     data-signals:audioMuted="false"
-  ></local-event-script>
+  >
+    <!--
+      JS calls window.markDataReady(type) after each fetch.
+      That function updates window._readyFlags and fires analysis:run
+      once all three are ready. These on-event handlers broadcast the
+      events so other LES instances can observe the load sequence.
+    -->
+    <on-event name="data:earthquakes-loaded" handle="`
+      broadcast data:earthquakes-loaded
+    `"></on-event>
+
+    <on-event name="data:weather-loaded" handle="`
+      broadcast data:weather-loaded
+    `"></on-event>
+
+    <on-event name="data:fires-loaded" handle="`
+      broadcast data:fires-loaded
+    `"></on-event>
+
+    <!-- analysis:computed fires when all workers have reported results -->
+    <on-event name="analysis:computed" handle="`
+      broadcast page:data-ready
+    `"></on-event>
+  </local-event-script>
 
   <!-- Map animation: camera pan, screen shake, layer transitions -->
   <local-event-script
@@ -536,7 +564,9 @@
     data-signals:wTemp="0.15"
     data-signals:pinnedWeights="{ eq: false, fire: false, temp: false }"
     data-signals:lastPinnedWeight="''"
-  ></local-event-script>
+  >
+    <!-- LES commands and choreography added in Step 7 -->
+  </local-event-script>
 
   <!-- Timeline: play/pause, autoplay, wrap-around -->
   <local-event-script
@@ -545,7 +575,23 @@
     data-signals:currentDatetime="''"
     data-signals:playing="false"
     data-signals:autoPlaySpeed="1"
-  ></local-event-script>
+  >
+    <!--
+      Recompute the ISO datetime string whenever the hour scrubber moves.
+      window._formatHour(h) is defined in the module script and uses the
+      base time from the loaded weather data (or a placeholder before load).
+    -->
+    <!--
+      call window.updateTimeDisplay(h) instead of bare signal assignment.
+      LES parser doesn't support $signal = expr; use call for JS-side effects.
+    -->
+    <on-signal
+      name="$currentHour"
+      handle="`
+        call window.updateTimeDisplay($currentHour)
+      `"
+    ></on-signal>
+  </local-event-script>
 
   <!-- Presence: sign-in, timeline presence sync -->
   <local-event-script
@@ -926,6 +972,8 @@
       window._signedInName = name
       console.log('[d3] sign-in:', name)
       step3MaybeDismissSplash()
+      // Kick off data loading — this is the user gesture Datastar needs
+      window.fetchMapData()
     })
 
     // ── Modal open/close (View Transition morph added in Step 10) ─────
@@ -1269,6 +1317,271 @@
         : result)
       // Step 6 will replace this log with real layer re-draws
     })
+
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 5: Data loading + analysis dispatch
+    // ─────────────────────────────────────────────────────────────────────
+
+    // ── Data store ────────────────────────────────────────────────────────
+    // Large GeoJSON/arrays live here — not in Datastar signals.
+    // LES signals hold only small scalars (booleans, strings, numbers).
+    window._data = {
+      earthquakes: null,   // USGS FeatureCollection features array
+      weather:     null,   // Open-Meteo 30-point grid
+      fires:       null,   // FIRMS hotspot array
+      baseTime:    null,   // ISO string of hour[0] from weather data
+    }
+
+    // ── Datetime formatter ────────────────────────────────────────────────
+    // Called from #timeline-controller's on-signal when $currentHour changes.
+    // Returns a display string like "Mon Mar 24 · 14:00 UTC"
+    window._formatHour = function(h) {
+      if (!window._data.baseTime) {
+        const now = new Date()
+        now.setMinutes(0, 0, 0)
+        return formatDt(new Date(now.getTime() + h * 3_600_000))
+      }
+      const base = new Date(window._data.baseTime)
+      return formatDt(new Date(base.getTime() + h * 3_600_000))
+    }
+
+    function formatDt(d) {
+      const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+      const hh = String(d.getUTCHours()).padStart(2,'0')
+      const mm = String(d.getUTCMinutes()).padStart(2,'0')
+      return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${d.getUTCDate()} · ${hh}:${mm} UTC`
+    }
+
+    // ── Loading indicator helpers ─────────────────────────────────────────
+    function markLoaded(id) {
+      document.getElementById(id)?.classList.add('is-done')
+    }
+
+    // ── Fire a named event on a LES element from JS ───────────────────────
+    // LES on-event listeners on the host element hear these.
+    function fireLES(id, name) {
+      const el = document.getElementById(id)
+      if (!el) return
+      el.dispatchEvent(new CustomEvent(name, { bubbles: false }))
+    }
+
+    // ── Ready flags + all-ready gate ─────────────────────────────────────
+    // LES can't do bare signal assignment ($x = val is an unknown statement).
+    // We track readiness here in JS and drive analysis:run from JS directly.
+    window._readyFlags = { earthquakes: false, weather: false, fires: false }
+    let _analysisRunFired = false
+
+    window.markDataReady = function(type) {
+      window._readyFlags[type] = true
+      const { earthquakes, weather, fires } = window._readyFlags
+      if (earthquakes && weather && fires && !_analysisRunFired) {
+        _analysisRunFired = true
+        console.log('[d3] all data ready — running analysis')
+        // Call directly — no LES intermediary (LES `call` is for local-commands,
+        // not arbitrary window functions with arguments).
+        window.runAnalysis(0)
+      }
+    }
+
+    // ── Time display ──────────────────────────────────────────────────────
+    // Called by #timeline-controller's on-signal($currentHour) via `call`.
+    // Updates the #time-display element directly — bypasses Datastar signal
+    // assignment which LES can't do with bare $x = expr syntax.
+    window.updateTimeDisplay = function(h) {
+      const text = window._formatHour(h)
+      const el = document.getElementById('time-display')
+      if (el) el.textContent = text
+    }
+    // Seed display at hour 0 immediately
+    window.updateTimeDisplay(0)
+
+    // ── Fetch all three data sources in parallel ──────────────────────────
+    // fires is always marked ready (success or failure) so it never blocks
+    // the all-ready gate — the fires layer degrades gracefully to empty.
+    window.fetchMapData = async function() {
+      console.log('[d3] starting data fetch…')
+
+      await Promise.allSettled([
+        // Earthquakes — USGS significant_month via our Hono proxy
+        fetch('/api/d3/earthquakes')
+          .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
+          .then(data => {
+            window._data.earthquakes = (data.features || []).map(f => ({
+              lon:   f.geometry.coordinates[0],
+              lat:   f.geometry.coordinates[1],
+              depth: f.geometry.coordinates[2],
+              mag:   f.properties.mag,
+              place: f.properties.place,
+              time:  f.properties.time,
+            }))
+            markLoaded('li-earthquakes')
+            fireLES('page-controller', 'data:earthquakes-loaded')
+            window.markDataReady('earthquakes')
+            console.log('[d3] earthquakes:', window._data.earthquakes.length, 'events')
+          })
+          .catch(err => {
+            console.warn('[d3] earthquakes failed:', err)
+            window._data.earthquakes = []
+            markLoaded('li-earthquakes')
+            window.markDataReady('earthquakes')
+          }),
+
+        // Weather — Open-Meteo 30-point US grid
+        fetch('/api/d3/weather')
+          .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
+          .then(data => {
+            window._data.weather = data.points || []
+            const firstTime = window._data.weather[0]?.hourly?.time?.[0]
+            if (firstTime) {
+              window._data.baseTime = firstTime
+              window.updateTimeDisplay(0)
+            }
+            markLoaded('li-weather')
+            fireLES('page-controller', 'data:weather-loaded')
+            window.markDataReady('weather')
+            console.log('[d3] weather:', window._data.weather.length, 'grid points')
+          })
+          .catch(err => {
+            console.warn('[d3] weather failed:', err)
+            window._data.weather = []
+            markLoaded('li-weather')
+            window.markDataReady('weather')
+          }),
+
+        // Fires — NASA FIRMS (always marks ready, even on 502/missing key)
+        fetch('/api/d3/fires')
+          .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
+          .then(data => {
+            window._data.fires = data.fires || []
+            if (data.warning) {
+              console.warn('[d3] fires warning:', data.warning)
+            } else {
+              console.log('[d3] fires:', window._data.fires.length, 'hotspots')
+            }
+            markLoaded('li-fires')
+            fireLES('page-controller', 'data:fires-loaded')
+            window.markDataReady('fires')
+          })
+          .catch(err => {
+            // 502 = FIRMS key not yet active, API down, or quota exceeded.
+            // Degrade gracefully — fire layer shows empty, rest of demo works.
+            console.warn('[d3] fires unavailable:', err, '— continuing without fire data')
+            window._data.fires = []
+            markLoaded('li-fires')
+            window.markDataReady('fires')
+          }),
+      ])
+    }
+
+    // ── Analysis dispatcher ───────────────────────────────────────────────
+    // Called by #map-controller's on-event("analysis:run") handler.
+    // Dispatches all worker tasks for the given hourIndex slice.
+    // Results come back through workers:result broadcast → Step 6 renders them.
+    window.runAnalysis = function(hourIndex) {
+      const h = Math.round(hourIndex) || 0
+      const d = window._data
+      if (!d.earthquakes || !d.weather) {
+        console.warn('[d3] runAnalysis called before data ready')
+        return
+      }
+
+      const stateFeatures = window._mapData?.stateFeatures
+      const bbox = [-125, 24, -66, 50]
+
+      const weights = {
+        eq:   window.mapController?.$wEarthquake ?? 0.5,
+        fire: window.mapController?.$wFire       ?? 0.35,
+        temp: window.mapController?.$wTemp       ?? 0.15,
+      }
+
+      // Slice earthquakes to those within the 7-day window
+      // (all significant_month events are within range — keep all)
+      const eqs = d.earthquakes
+
+      // Slice weather to the requested hour
+      const wxSlice = (d.weather || []).map(p => ({
+        lat:  p.lat,
+        lon:  p.lon,
+        temp: p.hourly?.temp?.[h] ?? null,
+        windSpeed: p.hourly?.windSpeed?.[h] ?? 0,
+        windDir:   p.hourly?.windDir?.[h]   ?? 0,
+      })).filter(p => p.temp !== null)
+
+      // Fires don't have hourly granularity (FIRMS is per-detection day),
+      // so we use the full set for every hour
+      const fires = d.fires || []
+
+      // Dispatch all five worker tasks in parallel
+      if (window.workerPool) {
+        window.workerPool.dispatch('isobands:temp', {
+          points: wxSlice, breaks: [-10,-5,0,5,10,15,20,25,30,35], bbox
+        }).catch(e => console.warn('[d3] isobands:temp failed:', e.message))
+
+        window.workerPool.dispatch('isobands:fire', {
+          fires, bbox
+        }).catch(e => console.warn('[d3] isobands:fire failed:', e.message))
+
+        window.workerPool.dispatch('isobands:seismic', {
+          earthquakes: eqs, bbox
+        }).catch(e => console.warn('[d3] isobands:seismic failed:', e.message))
+
+        if (stateFeatures) {
+          window.workerPool.dispatch('aggregation:state', {
+            stateFeatures, fires, weatherPoints: d.weather, hourIndex: h
+          }).catch(e => console.warn('[d3] aggregation:state failed:', e.message))
+        }
+
+        window.workerPool.dispatch('scoring:poi', {
+          earthquakes: eqs, fires, stateTemp: [], weights,
+          frpMax: 500_000,
+        }).catch(e => console.warn('[d3] scoring:poi failed:', e.message))
+      }
+
+      console.log('[d3] analysis dispatched for hour', h,
+        `(${eqs.length} eq, ${fires.length} fires, ${wxSlice.length} wx pts)`)
+    }
+
+    // ── Track pending worker results → fire analysis:computed when done ───
+    // We expect 4–5 results per analysis run. When all arrive, broadcast
+    // analysis:computed so page-controller can signal data readiness.
+    // Uses a simple generation counter to avoid cross-run collisions.
+    let _analysisGen    = 0
+    let _analysisPending = 0
+
+    document.addEventListener('workers:result', (e) => {
+      const [task, resultJson] = e.detail?.payload || []
+      if (!task) return
+
+      let result
+      try { result = typeof resultJson === 'string' ? JSON.parse(resultJson) : resultJson }
+      catch { return }
+
+      // Store result by task for Step 6 rendering
+      if (!window._results) window._results = {}
+      window._results[task] = result
+
+      const featureCount = Array.isArray(result?.features)
+        ? result.features.length
+        : (Array.isArray(result?.centroids) ? result.centroids.length : '—')
+      console.log(`[d3] ← ${task}: ${featureCount}`)
+
+      // When all five tasks have at least one result, analysis is computed
+      const EXPECTED = ['isobands:temp','isobands:fire','isobands:seismic',
+                        'aggregation:state','scoring:poi']
+      const have = EXPECTED.filter(t => window._results[t] !== undefined)
+      if (have.length === EXPECTED.length) {
+        // All results in — fire analysis:computed once per full round
+        document.getElementById('page-controller')?.dispatchEvent(
+          new CustomEvent('analysis:computed', { bubbles: false })
+        )
+        markLoaded('li-analysis')
+      }
+    })
+
+    // ─────────────────────────────────────────────────────────────────────
+    // END STEP 5
+    // ─────────────────────────────────────────────────────────────────────
 
     // ── Boot: wait for custom element upgrade + layout ─────────────────
     // Strategy (most reliable — no CSS height-resolution ambiguity):

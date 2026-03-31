@@ -28,18 +28,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..', '..', '..')  // local-event-script/
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Environment
+// Environment — lazy getters, read at call-time not module-init time.
+// Avoids ESM hoisting: d3.ts imports are resolved before index.ts's
+// top-level await env loader runs. Reading inside functions means we
+// always see the final process.env state (populated by --env-file).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const FIRMS_KEY       = process.env['FIRMS_MAP_KEY']       || ''
-const OPENSKY_ID      = process.env['OPENSKY_CLIENT_ID']   || ''
-const OPENSKY_SECRET  = process.env['OPENSKY_CLIENT_SECRET'] || ''
+const getFirmsKey      = () => process.env['FIRMS_MAP_KEY']        || ''
+const getOpenskyId     = () => process.env['OPENSKY_CLIENT_ID']    || ''
+const getOpenskySecret = () => process.env['OPENSKY_CLIENT_SECRET'] || ''
 
-// Log key status at startup — called from index.ts
+// Log key status at startup — called from index.ts after env is loaded
 export function logD3KeyStatus() {
-  const firmsOk   = FIRMS_KEY ? '✓ present' : '✗ missing (fires disabled)  '
-  const openskyOk = (OPENSKY_ID && OPENSKY_SECRET) ? '✓ present' : '✗ missing (flights disabled)'
-  // Each content line must be exactly 52 chars (banner interior = 54, minus 2 leading spaces)
+  const firmsOk   = getFirmsKey()    ? '✓ present' : '✗ missing (fires disabled)  '
+  const openskyOk = (getOpenskyId() && getOpenskySecret()) ? '✓ present' : '✗ missing (flights disabled)'
   console.log(`  │  FIRMS_MAP_KEY:       ${firmsOk.padEnd(30)}│`)
   console.log(`  │  OpenSky:             ${openskyOk.padEnd(30)}│`)
 }
@@ -243,7 +245,7 @@ d3.get('/weather', async (c) => {
 // Returns: { fires: [{ lat, lon, frp, brightness, datetime }], warning? }
 
 d3.get('/fires', async (c) => {
-  if (!FIRMS_KEY) {
+  if (!getFirmsKey()) {
     return c.json({
       fires: [],
       warning: 'FIRMS_MAP_KEY not configured. Get a free key at https://firms.modaps.eosdis.nasa.gov/api/',
@@ -259,15 +261,19 @@ d3.get('/fires', async (c) => {
     // FIRMS area API: /api/area/csv/{MAP_KEY}/{SOURCE}/{AREA}/{DAY_RANGE}
     // VIIRS_NOAA20_NRT = near real-time, updated every ~12 hours
     // bbox = west,south,east,north  (CONUS)
-    const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${FIRMS_KEY}/VIIRS_NOAA20_NRT/-125,24,-66,50/7`
+    const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${getFirmsKey()}/VIIRS_NOAA20_NRT/-125,24,-66,50/2`
     const res = await fetch(url, { signal: AbortSignal.timeout(20_000) })
-    if (!res.ok) throw new Error(`FIRMS responded ${res.status}`)
+    if (!res.ok) {
+      const body = await res.text().catch(() => '(unreadable)')
+      console.error(`[d3] FIRMS ${res.status}: ${body.slice(0, 200)}`)
+      throw new Error(`FIRMS responded ${res.status}`)
+    }
 
     const csv = await res.text()
     const fires = parseFirmsCSV(csv)
 
     cache.set('fires', fires, TTL.FIRES)
-    console.log(`[d3] FIRMS fire data fetched: ${fires.length} hotspots`)
+    console.log(`[d3] FIRMS fire data fetched: ${fires.length} hotspots (2-day window)`)
     return c.json({ source: 'live', fires })
   } catch (err) {
     console.error('[d3] FIRMS fetch failed:', err)
@@ -318,7 +324,7 @@ function parseFirmsCSV(csv: string): Array<{
 // Returns: { flights: [{ icao24, callsign, lat, lon, alt, vel, hdg }], warning? }
 
 d3.get('/flights', async (c) => {
-  if (!OPENSKY_ID || !OPENSKY_SECRET) {
+  if (!getOpenskyId() || !getOpenskySecret()) {
     return c.json({
       flights: [],
       warning: 'OpenSky credentials not configured. Get a free account at https://opensky-network.org/',
@@ -339,8 +345,8 @@ d3.get('/flights', async (c) => {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           grant_type:    'client_credentials',
-          client_id:     OPENSKY_ID,
-          client_secret: OPENSKY_SECRET,
+          client_id:     getOpenskyId(),
+          client_secret: getOpenskySecret(),
         }),
         signal: AbortSignal.timeout(8_000),
       }
