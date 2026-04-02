@@ -1,7 +1,7 @@
 import type {
   LESNode, ExprNode, SequenceNode, ParallelNode,
-  SetNode, EmitNode, BroadcastNode, WaitNode,
-  CallNode, BindNode, MatchNode, TryNode, AnimationNode,
+  SetNode, EmitNode, BroadcastNode, BubbleNode, CascadeNode, ForwardNode,
+  WaitNode, CallNode, BindNode, MatchNode, TryNode, AnimationNode,
 } from '@parser/ast.js'
 import type { PatternNode } from '@parser/ast.js'
 import { LESScope } from './scope.js'
@@ -27,8 +27,14 @@ export interface LESContext {
   setSignal: (name: string, value: unknown) => void
   /** Dispatch a local CustomEvent on the host (bubbles: false) */
   emitLocal: (event: string, payload: unknown[]) => void
-  /** Dispatch a DOM-wide CustomEvent (bubbles: true, composed: true) */
+  /** Dispatch a DOM-wide CustomEvent on document (global scope) */
   broadcast: (event: string, payload: unknown[]) => void
+  /** Dispatch upward through all LES ancestors (host → parent → … → root) */
+  bubble: (event: string, payload: unknown[]) => void
+  /** Dispatch downward to all registered LES descendants */
+  cascade: (event: string, payload: unknown[]) => void
+  /** Call a named function in the global LESBridge registry */
+  forward: (name: string, payload: unknown[]) => Promise<void>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,11 +80,35 @@ export async function execute(node: LESNode, ctx: LESContext): Promise<void> {
       return
     }
 
-    // ── broadcast event:name [payload] ────────────────────────────────────
+    // ── broadcast event:name [payload] — global (document) ────────────────
     case 'broadcast': {
       const n = node as BroadcastNode
       const payload = n.payload.map(p => evalExpr(p, ctx))
       ctx.broadcast(n.event, payload)
+      return
+    }
+
+    // ── bubble event:name [payload] — up through all LES ancestors ─────────
+    case 'bubble': {
+      const n = node as BubbleNode
+      const payload = n.payload.map(p => evalExpr(p, ctx))
+      ctx.bubble(n.event, payload)
+      return
+    }
+
+    // ── cascade event:name [payload] — down to all LES descendants ─────────
+    case 'cascade': {
+      const n = node as CascadeNode
+      const payload = n.payload.map(p => evalExpr(p, ctx))
+      ctx.cascade(n.event, payload)
+      return
+    }
+
+    // ── forward name [payload] — call registered LESBridge function ────────
+    case 'forward': {
+      const n = node as ForwardNode
+      const payload = n.payload.map(p => evalExpr(p, ctx))
+      await ctx.forward(n.name, payload)
       return
     }
 

@@ -1,6 +1,7 @@
 import type {
   LESNode, ExprNode, SequenceNode, ParallelNode,
-  SetNode, EmitNode, BroadcastNode, WaitNode, CallNode,
+  SetNode, EmitNode, BroadcastNode, BubbleNode, CascadeNode, ForwardNode,
+  WaitNode, CallNode,
   BindNode, ActionNode, MatchNode, MatchArm, PatternNode,
   TryNode, AnimationNode,
 } from './ast.js'
@@ -179,6 +180,9 @@ export class LESParser {
     if (first === 'set')       return this.parseSet(text, token)
     if (first === 'emit')      return this.parseEmit(text, token)
     if (first === 'broadcast') return this.parseBroadcast(text, token)
+    if (first === 'bubble')    return this.parseBubble(text, token)
+    if (first === 'cascade')   return this.parseCascade(text, token)
+    if (first === 'forward')   return this.parseForward(text, token)
     if (first === 'call')      return this.parseCall(text, token)
     if (first === 'wait')      return this.parseWait(text, token)
 
@@ -329,6 +333,23 @@ export class LESParser {
   private parseBroadcast(text: string, token: Token): BroadcastNode {
     const { name, payload } = parseEventLine(text.slice('broadcast'.length).trim(), token)
     return { type: 'broadcast', event: name, payload }
+  }
+
+  private parseBubble(text: string, token: Token): BubbleNode {
+    const { name, payload } = parseEventLine(text.slice('bubble'.length).trim(), token)
+    return { type: 'bubble', event: name, payload }
+  }
+
+  private parseCascade(text: string, token: Token): CascadeNode {
+    const { name, payload } = parseEventLine(text.slice('cascade'.length).trim(), token)
+    return { type: 'cascade', event: name, payload }
+  }
+
+  private parseForward(text: string, token: Token): ForwardNode {
+    // `forward name` or `forward name [payload, ...]`
+    // Same shape as parseEmit/parseBroadcast but the "event" is a bridge name.
+    const { name, payload } = parseEventLine(text.slice('forward'.length).trim(), token)
+    return { type: 'forward', name, payload }
   }
 
   private parseCall(text: string, token: Token): CallNode {
@@ -517,7 +538,11 @@ function parseEventLine(
   const name = raw.slice(0, bracketIdx).trim()
   const payloadRaw = raw.slice(bracketIdx + 1, raw.lastIndexOf(']')).trim()
 
-  // Payload elements are comma or space separated expressions
+  // Payload elements are comma-separated or two-or-more-space separated.
+  // Single space is intentionally NOT a separator — expressions can contain
+  // spaces (e.g., `a + b`). Use commas or double-space to separate items:
+  //   [payload[0], payload[1]]   ← preferred (unambiguous)
+  //   [payload[0]  payload[1]]   ← also works (legacy double-space)
   const payload: ExprNode[] = payloadRaw
     ? payloadRaw.split(/,\s*|\s{2,}/).map(s => expr(s.trim())).filter(e => e.raw)
     : []

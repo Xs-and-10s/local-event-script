@@ -586,29 +586,9 @@
   -->
 
   <!--
-    Worker pool event bus — no visual children.
-    Routes results from window.workerPool → LES broadcast → all instances.
-  -->
-  <local-event-script
-    id="worker-controller"
-    data-signals:workerCount="4"
-  >
-    <on-load run="emit workers:initialized"></on-load>
-
-    <on-event name="workers:result-received" handle="`
-      broadcast workers:result [payload[0]  payload[1]]
-    `"></on-event>
-
-    <on-event name="workers:initialized" handle="`
-      broadcast workers:initialized
-    `"></on-event>
-  </local-event-script>
-
-  <!--
-    Page-level sequencer.
-    LES handles event routing (broadcast). The all-ready gate and
-    signal mutation live in JS (window.markDataReady) to avoid the
-    LES parser's "unknown statement" error on bare signal assignment.
+    Root LES controller — all child controllers nested inside.
+    Communication: bubble (up ancestors) / cascade (down descendants) / broadcast (global).
+    Initialization: bottom-up — leaves fire on-load first, root fires last.
   -->
   <local-event-script
     id="page-controller"
@@ -620,12 +600,24 @@
     data-signals:audioPlaying="false"
     data-signals:audioMuted="false"
   >
+    <!-- Bridge module: initializes LESBridge for `forward` primitive -->
+    <use-module type="bridge"></use-module>
+    <local-bridge name="exitSplash"         fn="window.exitSplash"></local-bridge>
+    <local-bridge name="enterLayersStagger" fn="window.enterLayersStagger"></local-bridge>
+
     <!--
-      JS calls window.markDataReady(type) after each fetch.
-      That function updates window._readyFlags and fires analysis:run
-      once all three are ready. These on-event handlers broadcast the
-      events so other LES instances can observe the load sequence.
+      Relay: worker-controller bubbles these up to page-controller, which
+      re-broadcasts globally so JS document.addEventListener listeners work unchanged.
     -->
+    <on-event name="workers:result" handle="`
+      broadcast workers:result [payload[0], payload[1]]
+    `"></on-event>
+
+    <on-event name="workers:initialized" handle="`
+      broadcast workers:initialized
+    `"></on-event>
+
+    <!-- Data-loaded: fired on page-controller directly by fireLES(), re-broadcast globally -->
     <on-event name="data:earthquakes-loaded" handle="`
       broadcast data:earthquakes-loaded
     `"></on-event>
@@ -638,116 +630,107 @@
       broadcast data:fires-loaded
     `"></on-event>
 
-    <!-- analysis:computed → broadcast page:data-ready -->
     <on-event name="analysis:computed" handle="`
       broadcast page:data-ready
     `"></on-event>
 
-    <!--
-      page:data-ready — all data loaded AND map rendered.
-      Drive the full splash exit + layer stagger sequence.
-      LES `then` chains steps sequentially; `and` runs them in parallel.
-    -->
-    <!--
-      Registered commands — events call these; commands call window functions.
-      window.* calls are now fully awaited by the fixed executor.
-    -->
-
-    <!-- splash:exit — slides splash down and fades it out -->
+    <!-- Commands: use forward to call registered bridge functions -->
     <local-command name="splash:exit" do="`
-      call window.exitSplash
+      forward exitSplash
     `"></local-command>
 
-    <!-- layers:enter — staggers all data layers into view -->
     <local-command name="layers:enter" do="`
-      call window.enterLayersStagger
+      forward enterLayersStagger
     `"></local-command>
 
     <!--
       page:data-ready → entrance sequence.
-      1. splash:exit  (720ms, awaited)
-      2. broadcast map:layers-ready  (instant — fires shake:and-pan async)
-      3. call layers:enter  (runs CONCURRENTLY with shake+pan)
-
-      broadcast is synchronous: the shake:and-pan event handler starts its
-      async work, then LES immediately proceeds to layers:enter without
-      waiting for shake to finish. Shake and layers enter simultaneously.
+      cascade map:layers-ready: fires DOWN to all descendants (replaces broadcast).
     -->
     <on-event name="page:data-ready" handle="`
       call splash:exit
-      then broadcast map:layers-ready
+      then cascade map:layers-ready
       then call layers:enter
     `"></on-event>
-  </local-event-script>
 
-  <!-- Map animation: camera pan, screen shake, layer transitions -->
-  <local-event-script
-    id="map-controller"
-    data-signals:strongestPOI="null"
-    data-signals:shakeIntensity="0"
-    data-signals:flightsEnabled="false"
-    data-signals:flightsDomesticEnabled="false"
-    data-signals:flightsIntlEnabled="false"
-    data-signals:wEarthquake="0.59"
-    data-signals:wFire="0.35"
-    data-signals:wTemp="0.15"
-    data-signals:pinnedWeights="{ eq: false, fire: false, temp: false }"
-    data-signals:lastPinnedWeight="''"
-  >
-    <!-- shake:and-pan — screen shake then camera pan to strongest CONUS POI -->
-    <local-command name="shake:and-pan" do="`
-      call window.shakeAndPan
-    `"></local-command>
+    <!-- ─── Child LES controllers — last, after all config elements ──────── -->
 
-    <!--
-      map:layers-ready — seismic rings are visible; shake and pan.
-      `call shake:and-pan` invokes the registered command above,
-      which awaits window.shakeAndPan (a Promise-returning JS function).
-    -->
-    <on-event name="map:layers-ready" handle="`
-      call shake:and-pan
-    `"></on-event>
-  </local-event-script>
+    <!-- Worker relay: receives fireLES dispatches, bubbles results up -->
+    <local-event-script
+      id="worker-controller"
+      data-signals:workerCount="4"
+    >
+      <on-load run="emit workers:initialized"></on-load>
 
-  <!-- Timeline: play/pause, autoplay, wrap-around -->
-  <local-event-script
-    id="timeline-controller"
-    data-signals:currentHour="0"
-    data-signals:currentDatetime="''"
-    data-signals:playing="false"
-    data-signals:autoPlaySpeed="1"
-  >
-    <!--
-      Recompute the ISO datetime string whenever the hour scrubber moves.
-      window._formatHour(h) is defined in the module script and uses the
-      base time from the loaded weather data (or a placeholder before load).
-    -->
-    <!-- Commands — all window.* invocations go through a named command -->
-    <local-command name="timeline:update-display" do="`call window.updateTimeDisplay($currentHour)`"></local-command>
-    <local-command name="timeline:play-cmd"       do="`call window.timelinePlay`"></local-command>
-    <local-command name="timeline:pause-cmd"      do="`call window.timelinePause`"></local-command>
-    <local-command name="timeline:speed-cmd"      do="`call window.timelineSpeedCycle`"></local-command>
+      <on-event name="workers:result-received" handle="`
+        bubble workers:result [payload[0], payload[1]]
+      `"></on-event>
 
-    <!--
-      Signal change fires a command, not window.* directly.
-      Event (signal changed) → command (update display) → window.* — clean CQRS.
-    -->
-    <on-signal name="$currentHour" handle="`call timeline:update-display`"></on-signal>
+      <on-event name="workers:initialized" handle="`
+        bubble workers:initialized
+      `"></on-event>
+    </local-event-script>
 
-    <on-event name="timeline:play"        handle="`call timeline:play-cmd`"></on-event>
-    <on-event name="timeline:pause"       handle="`call timeline:pause-cmd`"></on-event>
-    <on-event name="timeline:speed-cycle" handle="`call timeline:speed-cmd`"></on-event>
-  </local-event-script>
+    <!-- Map animation: receives cascade from page-controller, runs shake+pan -->
+    <local-event-script
+      id="map-controller"
+      data-signals:strongestPOI="null"
+      data-signals:shakeIntensity="0"
+      data-signals:flightsEnabled="false"
+      data-signals:flightsDomesticEnabled="false"
+      data-signals:flightsIntlEnabled="false"
+      data-signals:wEarthquake="0.59"
+      data-signals:wFire="0.35"
+      data-signals:wTemp="0.15"
+      data-signals:pinnedWeights="{ eq: false, fire: false, temp: false }"
+      data-signals:lastPinnedWeight="''">
+      <local-bridge name="shakeAndPan" fn="window.shakeAndPan"></local-bridge>
 
-  <!-- Presence: sign-in, timeline presence sync -->
-  <local-event-script
-    id="presence-controller"
-    data-signals:userName="''"
-    data-signals:userInitials="''"
-    data-signals:datePinned="false"
-    data-signals:pinnedHour="null"
-    data-signals:otherUsers="[]"
-  ></local-event-script>
+      <local-command name="shake:and-pan" do="`
+        forward shakeAndPan
+      `"></local-command>
+
+      <on-event name="map:layers-ready" handle="`
+        call shake:and-pan
+      `"></on-event>
+    </local-event-script>
+
+    <!-- Timeline: play/pause/speed, scrubber sync -->
+    <local-event-script
+      id="timeline-controller"
+      data-signals:currentHour="0"
+      data-signals:currentDatetime="''
+"      data-signals:playing="false"
+      data-signals:autoPlaySpeed="1"
+    >
+      <local-bridge name="updateTimeDisplay"  fn="window.updateTimeDisplay"></local-bridge>
+      <local-bridge name="timelinePlay"       fn="window.timelinePlay"></local-bridge>
+      <local-bridge name="timelinePause"      fn="window.timelinePause"></local-bridge>
+      <local-bridge name="timelineSpeedCycle" fn="window.timelineSpeedCycle"></local-bridge>
+
+      <local-command name="timeline:update-display" do="`forward updateTimeDisplay [$currentHour]`"></local-command>
+      <local-command name="timeline:play-cmd"       do="`forward timelinePlay`"></local-command>
+      <local-command name="timeline:pause-cmd"      do="`forward timelinePause`"></local-command>
+      <local-command name="timeline:speed-cmd"      do="`forward timelineSpeedCycle`"></local-command>
+
+      <on-signal name="$currentHour" handle="`call timeline:update-display`"></on-signal>
+
+      <on-event name="timeline:play"        handle="`call timeline:play-cmd`"></on-event>
+      <on-event name="timeline:pause"       handle="`call timeline:pause-cmd`"></on-event>
+      <on-event name="timeline:speed-cycle" handle="`call timeline:speed-cmd`"></on-event>
+    </local-event-script>
+
+    <!-- Presence: sign-in, timeline presence sync -->
+    <local-event-script
+      id="presence-controller"
+      data-signals:userName="''
+"      data-signals:userInitials="''
+"      data-signals:datePinned="false"
+      data-signals:pinnedHour="null"
+      data-signals:otherUsers="[]"
+    ></local-event-script>
+
+  </local-event-script><!-- /#page-controller (root) -->
 
   <!--
     ═══════════════════════════════════════════════════════════════════

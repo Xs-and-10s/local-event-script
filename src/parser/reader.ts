@@ -25,7 +25,7 @@ const HANDLERS: Record<string, Handler> = {
     const src  = el.getAttribute('src')?.trim()  ?? null
 
     if (!type && !src) {
-      console.warn('[LES] <use-module> has neither type= nor src= — ignored.', el)
+      console.warn('[LES] <use-module> has neither type= nor src= \u2014 ignored.', el)
       return
     }
 
@@ -37,11 +37,11 @@ const HANDLERS: Record<string, Handler> = {
     const body = el.getAttribute('do')?.trim()   ?? ''
 
     if (!name) {
-      console.warn('[LES] <local-command> missing required name= attribute — ignored.', el)
+      console.warn('[LES] <local-command> missing required name= attribute \u2014 ignored.', el)
       return
     }
     if (!body) {
-      console.warn(`[LES] <local-command name="${name}"> missing required do= attribute — ignored.`, el)
+      console.warn(`[LES] <local-command name="${name}"> missing required do= attribute \u2014 ignored.`, el)
       return
     }
 
@@ -59,11 +59,11 @@ const HANDLERS: Record<string, Handler> = {
     const body = el.getAttribute('handle')?.trim() ?? ''
 
     if (!name) {
-      console.warn('[LES] <on-event> missing required name= attribute — ignored.', el)
+      console.warn('[LES] <on-event> missing required name= attribute \u2014 ignored.', el)
       return
     }
     if (!body) {
-      console.warn(`[LES] <on-event name="${name}"> missing required handle= attribute — ignored.`, el)
+      console.warn(`[LES] <on-event name="${name}"> missing required handle= attribute \u2014 ignored.`, el)
       return
     }
 
@@ -75,11 +75,11 @@ const HANDLERS: Record<string, Handler> = {
     const body = el.getAttribute('handle')?.trim() ?? ''
 
     if (!name) {
-      console.warn('[LES] <on-signal> missing required name= attribute — ignored.', el)
+      console.warn('[LES] <on-signal> missing required name= attribute \u2014 ignored.', el)
       return
     }
     if (!body) {
-      console.warn(`[LES] <on-signal name="${name}"> missing required handle= attribute — ignored.`, el)
+      console.warn(`[LES] <on-signal name="${name}"> missing required handle= attribute \u2014 ignored.`, el)
       return
     }
 
@@ -94,7 +94,7 @@ const HANDLERS: Record<string, Handler> = {
   'on-load'(el, config) {
     const body = el.getAttribute('run')?.trim() ?? ''
     if (!body) {
-      console.warn('[LES] <on-load> missing required run= attribute — ignored.', el)
+      console.warn('[LES] <on-load> missing required run= attribute \u2014 ignored.', el)
       return
     }
     config.onLoad.push({ body: stripBody(body), element: el })
@@ -103,7 +103,7 @@ const HANDLERS: Record<string, Handler> = {
   'on-enter'(el, config) {
     const body = el.getAttribute('run')?.trim() ?? ''
     if (!body) {
-      console.warn('[LES] <on-enter> missing required run= attribute — ignored.', el)
+      console.warn('[LES] <on-enter> missing required run= attribute \u2014 ignored.', el)
       return
     }
     config.onEnter.push({
@@ -116,7 +116,7 @@ const HANDLERS: Record<string, Handler> = {
   'on-exit'(el, config) {
     const body = el.getAttribute('run')?.trim() ?? ''
     if (!body) {
-      console.warn('[LES] <on-exit> missing required run= attribute — ignored.', el)
+      console.warn('[LES] <on-exit> missing required run= attribute \u2014 ignored.', el)
       return
     }
     config.onExit.push({ body: stripBody(body), element: el })
@@ -124,18 +124,55 @@ const HANDLERS: Record<string, Handler> = {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// readConfig — the public entry point
+// Elements that are valid LES children but handled outside readConfig.
+//
+// These are silently accepted \u2014 no "unknown element" warning \u2014 because their
+// semantics are managed by other parts of the runtime:
+//
+//   local-event-script  Phase 2: child LES controllers in the nested tree.
+//                       Children register themselves with their parent in
+//                       connectedCallback; readConfig does not need to read them.
+//                       Convention: place child <local-event-script> elements
+//                       AFTER all other config children (<local-command>,
+//                       <on-event>, etc.) so the parent's config is fully read
+//                       before child elements are encountered.
+//
+//   local-bridge        Phase 2: bridge declarations for the `forward` primitive.
+//                       Registered by the bridge module at init time.
+// ─────────────────────────────────────────────────────────────────────────────
+const DEFERRED_CHILDREN = new Set([
+  'local-event-script',
+  'local-bridge',
+])
+
+// The canonical list of config-bearing LES child elements.
+// Shown in the unknown-child warning so authors know exactly what's valid.
+const VALID_CONFIG_CHILDREN = [
+  '<use-module>',
+  '<local-command>',
+  '<on-event>',
+  '<on-signal>',
+  '<on-load>',
+  '<on-enter>',
+  '<on-exit>',
+]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// readConfig \u2014 the public entry point
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Walks the direct children of a <local-event-script> element and
  * produces a structured LESConfig.
  *
- * Only direct children are read — nested elements inside a <local-command>
+ * Only direct children are read \u2014 nested elements inside a <local-command>
  * body are not children of the host and are never visited here.
  *
- * Unknown child elements emit a console.warn and are collected in config.unknown
- * so tooling (e.g. a future LES language server) can report them.
+ * Three categories of child:
+ *   - Known config elements (HANDLERS): read and pushed into config.
+ *   - Deferred elements (DEFERRED_CHILDREN): silently accepted; handled
+ *     elsewhere in the runtime (tree wiring, bridge module, etc.).
+ *   - Unknown elements: logged as a warning with the list of valid choices.
  */
 export function readConfig(host: Element): LESConfig {
   const config: LESConfig = {
@@ -152,21 +189,26 @@ export function readConfig(host: Element): LESConfig {
 
   for (const child of Array.from(host.children)) {
     const tag = child.tagName.toLowerCase()
-    const handler = HANDLERS[tag]
 
+    // Known config element \u2014 read and push into config
+    const handler = HANDLERS[tag]
     if (handler) {
       handler(child, config)
-    } else {
-      config.unknown.push(child)
-      // Only warn for hyphenated custom element names — those are likely
-      // mis-typed LES keywords. Plain HTML elements (div, p, section, etc.)
-      // are valid content children and pass through silently.
-      if (tag.includes('-')) {
-        console.warn(
-          `[LES] Unknown child element <${tag}> inside <local-event-script id="${config.id}"> — ignored. Did you mean a LES element?`,
-          child
-        )
-      }
+      continue
+    }
+
+    // Deferred element \u2014 silently accepted, handled elsewhere in the runtime
+    if (DEFERRED_CHILDREN.has(tag)) continue
+
+    // Unknown element \u2014 collect and warn if hyphenated (likely a typo)
+    config.unknown.push(child)
+    if (tag.includes('-')) {
+      console.warn(
+        `[LES] Unknown child element <${tag}> inside <local-event-script id="${config.id}"> \u2014 ignored.\n` +
+        `  Config children: ${VALID_CONFIG_CHILDREN.join(', ')}\n` +
+        `  Also valid (deferred): <local-event-script>, <local-bridge>`,
+        child
+      )
     }
   }
 
@@ -174,7 +216,7 @@ export function readConfig(host: Element): LESConfig {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// logConfig — structured checkpoint log
+// logConfig \u2014 structured checkpoint log
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**

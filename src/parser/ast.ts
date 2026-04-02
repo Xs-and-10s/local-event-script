@@ -47,11 +47,52 @@ export interface EmitNode {
 
 /**
  * broadcast event:name [payload, ...] — dispatches a DOM CustomEvent
- * with bubbles: true, composed: true so external Datastar listeners hear it.
+ * on document (global scope). All LES instances and external JS listeners
+ * on document will receive it.
  */
 export interface BroadcastNode {
   type: 'broadcast'
   event: string
+  payload: ExprNode[]
+}
+
+/**
+ * bubble event:name [payload, ...] — dispatches upward through all LES
+ * ancestors (parent → grandparent → … → root). Every ancestor that has an
+ * on-event handler for this event will fire it. Propagation always reaches
+ * root; there is no implicit stopping.
+ */
+export interface BubbleNode {
+  type: 'bubble'
+  event: string
+  payload: ExprNode[]
+}
+
+/**
+ * cascade event:name [payload, ...] — dispatches downward to ALL registered
+ * LES descendants (depth-first). Every descendant with an on-event handler
+ * for this event will fire it.
+ */
+export interface CascadeNode {
+  type: 'cascade'
+  event: string
+  payload: ExprNode[]
+}
+
+/**
+ * forward name [payload, ...] — calls a named function in the global
+ * LESBridge registry. Used by root LES elements to hand off to JS without
+ * hard-coding `window.*` call sites.
+ *
+ * Registration (in JS, before LES init):
+ *   LESBridge.set('exitSplash', window.exitSplash)
+ *
+ * Usage (in a local-command body):
+ *   forward exitSplash
+ */
+export interface ForwardNode {
+  type: 'forward'
+  name: string
   payload: ExprNode[]
 }
 
@@ -175,6 +216,9 @@ export type LESNode =
   | SetNode
   | EmitNode
   | BroadcastNode
+  | BubbleNode
+  | CascadeNode
+  | ForwardNode
   | WaitNode
   | CallNode
   | BindNode

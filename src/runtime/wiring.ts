@@ -51,16 +51,62 @@ export function buildContext(
     console.log(`[LES] broadcast "${event}"`, payload.length ? payload : '')
     const root = host.getRootNode()
     const target = root instanceof Document ? root : (root as ShadowRoot).ownerDocument ?? document
-    // Stamp the broadcast with:
-    //   __broadcastOrigin:  the host that emitted it (for identity check)
-    //   __broadcastTrigger: the event name that caused this broadcast
-    //                       (docListeners skip only same-event relay loops)
     const trigger = _currentHandlerEvent.get(host) ?? null
     target.dispatchEvent(new CustomEvent(event, {
       detail: { payload, __broadcastOrigin: host, __broadcastTrigger: trigger },
       bubbles: false,
       composed: false,
     }))
+  }
+
+  // Walk up the _lesParent chain, dispatching on each ancestor's host element.
+  // Every ancestor with an on-event handler for this event will fire it.
+  // Propagation always reaches root — no implicit stopping.
+  const bubble = (event: string, payload: unknown[]) => {
+    console.log(`[LES] bubble "${event}"`, payload.length ? payload : '')
+    let current = (host as any)._lesParent as Element | null
+    while (current) {
+      current.dispatchEvent(new CustomEvent(event, {
+        detail: { payload, __bubbleOrigin: host },
+        bubbles: false,
+        composed: false,
+      }))
+      current = (current as any)._lesParent as Element | null
+    }
+  }
+
+  // Walk all registered LES descendants depth-first, dispatching on each.
+  const cascade = (event: string, payload: unknown[]) => {
+    console.log(`[LES] cascade "${event}"`, payload.length ? payload : '')
+    const visit = (el: any) => {
+      const children: Set<Element> = el._lesChildren ?? new Set()
+      for (const child of children) {
+        child.dispatchEvent(new CustomEvent(event, {
+          detail: { payload, __cascadeOrigin: host },
+          bubbles: false,
+          composed: false,
+        }))
+        visit(child)
+      }
+    }
+    visit(host)
+  }
+
+  // Looks up a named function in the global LESBridge registry and calls it.
+  const forward = async (name: string, payload: unknown[]) => {
+    const registry = (globalThis as any).LESBridge as Map<string, (...args: unknown[]) => unknown> | undefined
+    if (!registry) {
+      console.warn(`[LES] forward "${name}": LESBridge not initialized. Add <use-module type="bridge"> or set window.LESBridge before LES init.`)
+      return
+    }
+    const fn = registry.get(name)
+    if (!fn) {
+      console.warn(`[LES] forward "${name}": no bridge registered. Available: [${[...registry.keys()].join(', ')}]`)
+      return
+    }
+    console.log(`[LES] forward "${name}"`, payload.length ? payload : '')
+    const result = fn(...payload)
+    if (result instanceof Promise) await result
   }
 
   return {
@@ -72,6 +118,9 @@ export function buildContext(
     setSignal: signals.set,
     emitLocal,
     broadcast,
+    bubble,
+    cascade,
+    forward,
   }
 }
 

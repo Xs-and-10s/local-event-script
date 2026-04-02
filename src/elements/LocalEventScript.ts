@@ -27,6 +27,30 @@ export class LocalEventScript extends HTMLElement {
   private _dsEffect: ((fn: () => void) => void) | undefined = undefined
   private _dsSignal: (<T>(name: string, init?: T) => { value: T }) | undefined = undefined
 
+  // ── Phase 2: LES tree wiring ───────────────────────────────────────────────
+  // Parent reference set synchronously in connectedCallback (before microtask)
+  // so the parent's _init() sees this child in _lesChildren when it runs.
+  // Public so wiring.ts can traverse the tree for bubble/cascade without importing
+  // LocalEventScript (which would create a circular module dependency).
+  public _lesParent: LocalEventScript | null = null
+  public _lesChildren: Set<LocalEventScript> = new Set()
+
+  // Resolves when _init() completes (including children's lesReady).
+  // Parent's _init() awaits this before firing its own on-load, creating
+  // bottom-up initialization: leaves fire on-load first, root fires last.
+  public readonly lesReady: Promise<void>
+  private _resolveReady!: () => void
+
+  constructor() {
+    super()
+    this.lesReady = new Promise<void>(resolve => { this._resolveReady = resolve })
+    // Ensure LESBridge exists globally for the `forward` primitive.
+    // Idempotent: no-op if already set (e.g., by bridge module or user script).
+    if (!('LESBridge' in globalThis)) {
+      ;(globalThis as any).LESBridge = new Map<string, (...args: unknown[]) => unknown>()
+    }
+  }
+
   get config():  LESConfig | null    { return this._config }
   get wiring():  ParsedWiring | null { return this._wiring }
   get context(): LESContext | null   { return this._ctx }
@@ -34,10 +58,19 @@ export class LocalEventScript extends HTMLElement {
   static get observedAttributes(): string[] { return [] }
 
   connectedCallback(): void {
+    // Synchronous parent registration — must happen before the microtask
+    // so the parent's _init() sees this child in _lesChildren when it awaits
+    // children's lesReady. Uses closest() which walks up the real DOM.
+    const parentLES = this.parentElement?.closest('local-event-script') as LocalEventScript | null
+    this._lesParent = parentLES ?? null
+    parentLES?._lesChildren.add(this)
+
     queueMicrotask(() => this._init())
   }
 
   disconnectedCallback(): void {
+    this._lesParent?._lesChildren.delete(this)
+    this._lesParent = null
     this._teardown()
   }
 
@@ -100,9 +133,34 @@ export class LocalEventScript extends HTMLElement {
 
     // Phase 6: Datastar bridge full activation — coming next
 
-    // on-load fires last, after everything is wired
+    // Register any <local-bridge> declarative bridges declared as children.
+    // Runs after modules load so the bridge module has initialized LESBridge.
+    this._registerLocalBridges()
+
+    // Wait for all direct LES children to complete their _init() before
+    // firing this element's on-load. Creates bottom-up initialization order:
+    // leaves → intermediate nodes → root. Uses allSettled so a failing child
+    // does not block the parent indefinitely.
+    const childPromises = [...this._lesChildren].map(c => c.lesReady)
+    if (childPromises.length > 0) {
+      let _timeoutId: ReturnType<typeof setTimeout>
+      const timeout = new Promise<void>(resolve => {
+        _timeoutId = setTimeout(() => {
+          console.warn(`[LES] ${this.id || '(no id)'}: not all children signalled ready within 3s — proceeding anyway`)
+          resolve()
+        }, 3000)
+      })
+      await Promise.race([
+        Promise.allSettled(childPromises).then(() => clearTimeout(_timeoutId)),
+        timeout,
+      ])
+    }
+
+    // on-load fires after all children are ready
     await fireOnLoad(this._wiring, () => this._ctx!)
 
+    // Signal readiness to our parent (it may be waiting on this)
+    this._resolveReady()
     console.log('[LES] ready:', this.id || '(no id)')
   }
 
@@ -113,6 +171,50 @@ export class LocalEventScript extends HTMLElement {
     this._config   = null
     this._wiring   = null
     this._ctx      = null
+    // Note: _lesChildren is NOT cleared — the children are still in the DOM
+    // and will re-register on their own reconnect. _lesParent is cleared in
+    // disconnectedCallback before _teardown() is called.
+  }
+
+  // ─── Local bridge registration ───────────────────────────────────────────
+
+  /**
+   * Reads <local-bridge name="exitSplash" fn="window.exitSplash"> children
+   * and registers them in the global LESBridge Map.
+   * Called after module loading so `<use-module type="bridge">` has run first.
+   */
+  private _registerLocalBridges(): void {
+    const registry = (globalThis as any).LESBridge as Map<string, (...args: unknown[]) => unknown> | undefined
+    if (!registry) return
+
+    for (const child of Array.from(this.children)) {
+      if (child.tagName.toLowerCase() !== 'local-bridge') continue
+      const name   = child.getAttribute('name')?.trim()
+      const fnExpr = child.getAttribute('fn')?.trim()
+      if (!name || !fnExpr) {
+        console.warn('[LES] <local-bridge> requires both name= and fn= attributes', child)
+        continue
+      }
+      // Register as a lazy wrapper: evaluate fn= expression on first call,
+      // not at init time. Window functions may not yet exist during LES init.
+      const capturedExpr = fnExpr
+      const capturedName = name
+      registry.set(name, (...args: unknown[]) => {
+        try {
+          // eslint-disable-next-line no-new-func
+          const resolved = new Function(`return (${capturedExpr})`)()
+          if (typeof resolved !== 'function') {
+            console.error(`[LES:bridge] forward "${capturedName}": fn="${capturedExpr}" resolved to ${typeof resolved} — is the function defined yet?`)
+            return undefined
+          }
+          return resolved(...args)
+        } catch (err) {
+          console.error(`[LES:bridge] forward "${capturedName}": fn= evaluation failed:`, err)
+          return undefined
+        }
+      })
+      console.log(`[LES:bridge] registered "${name}" (lazy)`)
+    }
   }
 
   // ─── Signal store ─────────────────────────────────────────────────────────

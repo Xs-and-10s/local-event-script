@@ -68,6 +68,7 @@ export class ModuleRegistry {
 /** Built-in module registry: type name → import path */
 const BUILTIN_MODULES: Record<string, () => Promise<{ default: LESModule }>> = {
   animation: () => import('./builtin/animation.js'),
+  bridge:    () => import('./builtin/bridge.js'),
 }
 
 /**
