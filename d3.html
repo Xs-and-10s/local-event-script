@@ -592,6 +592,7 @@
   -->
   <local-event-script
     id="page-controller"
+    auto-relay
     data-signals:dataState="'loading'"
     data-signals:earthquakesReady="false"
     data-signals:weatherReady="false"
@@ -606,16 +607,10 @@
     <local-bridge name="enterLayersStagger" fn="window.enterLayersStagger"></local-bridge>
 
     <!--
-      Relay: worker-controller bubbles these up to page-controller, which
-      re-broadcasts globally so JS document.addEventListener listeners work unchanged.
+      auto-relay: any bubble from a child is automatically re-broadcast on document.
+      Eliminates explicit relay on-event handlers for workers:result and workers:initialized.
+      JS document.addEventListener listeners continue to work unchanged.
     -->
-    <on-event name="workers:result" handle="`
-      broadcast workers:result [payload[0], payload[1]]
-    `"></on-event>
-
-    <on-event name="workers:initialized" handle="`
-      broadcast workers:initialized
-    `"></on-event>
 
     <!-- Data-loaded: fired on page-controller directly by fireLES(), re-broadcast globally -->
     <on-event name="data:earthquakes-loaded" handle="`

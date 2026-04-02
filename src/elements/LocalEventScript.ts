@@ -96,6 +96,10 @@ export class LocalEventScript extends HTMLElement {
     this._wiring = this._parseAll(this._config)
 
     // Phase 4: build context, register commands, wire event handlers
+    // Connect this element's CommandRegistry to the parent's so `call`
+    // statements can resolve commands defined in any ancestor.
+    this.commands.setParent(this._lesParent?.commands ?? null)
+
     this._ctx = buildContext(
       this,
       this.commands,
@@ -162,6 +166,17 @@ export class LocalEventScript extends HTMLElement {
     // Signal readiness to our parent (it may be waiting on this)
     this._resolveReady()
     console.log('[LES] ready:', this.id || '(no id)')
+
+    // Notify parent with les:child-ready so it can react declaratively.
+    // payload[0] = this element's id, useful when parent has multiple children
+    // and wants to distinguish which one became ready.
+    if (this._lesParent) {
+      this._lesParent.dispatchEvent(new CustomEvent('les:child-ready', {
+        detail: { payload: [this.id || ''] },
+        bubbles: false,
+        composed: false,
+      }))
+    }
   }
 
   private _teardown(): void {

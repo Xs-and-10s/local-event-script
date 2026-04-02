@@ -62,15 +62,34 @@ export function buildContext(
   // Walk up the _lesParent chain, dispatching on each ancestor's host element.
   // Every ancestor with an on-event handler for this event will fire it.
   // Propagation always reaches root — no implicit stopping.
+  //
+  // auto-relay: if an ancestor has the `auto-relay` attribute, the bubble is
+  // ALSO re-broadcast on document so JS document.addEventListener listeners
+  // (and LES instances outside this tree) receive it — without needing explicit
+  // relay on-event handlers in the ancestor's LES config.
   const bubble = (event: string, payload: unknown[]) => {
     console.log(`[LES] bubble "${event}"`, payload.length ? payload : '')
+    const docRoot = host.getRootNode()
+    const doc = docRoot instanceof Document ? docRoot : (docRoot as ShadowRoot).ownerDocument ?? document
     let current = (host as any)._lesParent as Element | null
     while (current) {
+      // Dispatch on ancestor — ancestor's hostListener(s) fire for this event
       current.dispatchEvent(new CustomEvent(event, {
         detail: { payload, __bubbleOrigin: host },
         bubbles: false,
         composed: false,
       }))
+      // If this ancestor has the auto-relay attribute, re-broadcast globally.
+      // __autoRelayOrigin stamps the event so the ancestor's own docListener
+      // skips it (the hostListener already fired above — no double-handling).
+      if ((current as HTMLElement).hasAttribute('auto-relay')) {
+        console.log(`[LES] auto-relay "${event}" via #${(current as Element).id || '(no id)'}`)
+        doc.dispatchEvent(new CustomEvent(event, {
+          detail: { payload, __bubbleOrigin: host, __autoRelayOrigin: current },
+          bubbles: false,
+          composed: false,
+        }))
+      }
       current = (current as any)._lesParent as Element | null
     }
   }
@@ -201,8 +220,10 @@ export function wireEventHandlers(
       const sameOrigin  = detail.__broadcastOrigin === host
       const sameTrigger = detail.__broadcastTrigger === handler.event
       // Only skip if this host rebroadcasts the exact event it's handling (relay loop)
-      // Cross-event: trigger != handler.event → ALLOW even if same origin
       if (sameOrigin && sameTrigger) return
+      // Skip auto-relay events that this element itself re-broadcast.
+      // The hostListener already fired when the bubble hit this element directly.
+      if (detail.__autoRelayOrigin === host) return
       run(e)
     }
 

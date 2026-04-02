@@ -24,6 +24,17 @@ export interface CommandDef {
 export class CommandRegistry {
   private commands = new Map<string, CommandDef>()
 
+  // ── Command registry inheritance ──────────────────────────────────────────
+  // When a child LES element cannot find a command locally, it walks up to
+  // its parent's registry. Set by LocalEventScript._init() once the tree
+  // is established. Enables shared commands defined at root, callable from
+  // any descendant — like class method inheritance.
+  private _parent: CommandRegistry | null = null
+
+  setParent(parent: CommandRegistry | null): void {
+    this._parent = parent
+  }
+
   register(def: CommandDef): void {
     if (this.commands.has(def.name)) {
       console.warn(
@@ -34,12 +45,19 @@ export class CommandRegistry {
     this.commands.set(def.name, def)
   }
 
+  /** Looks up locally first, then walks up the parent chain. */
   get(name: string): CommandDef | undefined {
-    return this.commands.get(name)
+    return this.commands.get(name) ?? this._parent?.get(name)
   }
 
+  /** Returns true if command exists locally (does not check parent). */
   has(name: string): boolean {
     return this.commands.has(name)
+  }
+
+  /** Returns true if command exists locally OR in any ancestor registry. */
+  resolves(name: string): boolean {
+    return this.commands.has(name) || (this._parent?.resolves(name) ?? false)
   }
 
   names(): string[] {
