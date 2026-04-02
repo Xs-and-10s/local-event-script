@@ -49,16 +49,16 @@ export function buildContext(
 
   const broadcast = (event: string, payload: unknown[]) => {
     console.log(`[LES] broadcast "${event}"`, payload.length ? payload : '')
-    // Dispatch on document directly, not on the host element.
-    // This prevents the host's own on-event listeners from catching the
-    // broadcast — the host is the origin, not a receiver.
-    // Listeners on document (e.g. document.addEventListener) and Datastar
-    // data-on: bindings on any DOM element still receive it normally.
     const root = host.getRootNode()
     const target = root instanceof Document ? root : (root as ShadowRoot).ownerDocument ?? document
+    // Stamp the broadcast with:
+    //   __broadcastOrigin:  the host that emitted it (for identity check)
+    //   __broadcastTrigger: the event name that caused this broadcast
+    //                       (docListeners skip only same-event relay loops)
+    const trigger = _currentHandlerEvent.get(host) ?? null
     target.dispatchEvent(new CustomEvent(event, {
-      detail: { payload },
-      bubbles: false,   // already at the top — bubbling is meaningless here
+      detail: { payload, __broadcastOrigin: host, __broadcastTrigger: trigger },
+      bubbles: false,
       composed: false,
     }))
   }
@@ -75,8 +75,12 @@ export function buildContext(
   }
 }
 
+// Tracks which event name is currently being handled per host element.
+// Used to stamp broadcasts so docListeners can detect same-event relay loops.
+// JS is single-threaded: safe to set synchronously before execute(), read in broadcast().
+const _currentHandlerEvent = new WeakMap<Element, string>()
+
 /**
- * Registers all parsed commands into the registry.
  * Called once during _init, before any events are wired.
  */
 export function registerCommands(
@@ -99,8 +103,20 @@ export function registerCommands(
 }
 
 /**
- * Attaches event listeners on the host for all <on-event> handlers.
- * Returns a cleanup function that removes all listeners.
+ * Attaches event listeners on BOTH the host AND document for all <on-event> handlers.
+ *
+ * emit      → dispatched on host, bubbles:false     → host listener fires only
+ * broadcast → dispatched on document, bubbles:false → doc listener fires only
+ *
+ * Loop prevention for same-event relay (`on-event X → broadcast X`):
+ *   Before execute(), we stamp _currentHandlerEvent[host] = handler.event.
+ *   broadcast() reads this and stamps __broadcastTrigger on the CustomEvent.
+ *   docListener skips if: origin===host AND trigger===this handler's event.
+ *   This prevents: host handles X → broadcasts X → docListener handles X → loop.
+ *
+ * Cross-event delivery (`on-event A → broadcast B`, A≠B) is NOT blocked:
+ *   #page-controller handles analysis:computed → broadcasts page:data-ready.
+ *   Its own docListener for page:data-ready sees trigger=analysis:computed ≠ page:data-ready → FIRES ✓
  */
 export function wireEventHandlers(
   wiring: ParsedWiring,
@@ -109,23 +125,44 @@ export function wireEventHandlers(
 ): () => void {
   const cleanups: Array<() => void> = []
 
+  const doc: Document =
+    host.getRootNode() instanceof Document
+      ? (host.getRootNode() as Document)
+      : (host as Element).ownerDocument ?? document
+
   for (const handler of wiring.handlers) {
-    const listener = (e: Event) => {
+    const run = (e: Event) => {
+      _currentHandlerEvent.set(host, handler.event)
       const ctx = getCtx()
-      // Expose event detail in scope
       const handlerScope = ctx.scope.child()
       const detail = (e as CustomEvent).detail ?? {}
       handlerScope.set('event', e)
       handlerScope.set('payload', detail.payload ?? [])
-      const handlerCtx = { ...ctx, scope: handlerScope }
-
-      execute(handler.body, handlerCtx).catch(err => {
+      execute(handler.body, { ...ctx, scope: handlerScope }).catch(err => {
         console.error(`[LES] Error in handler for "${handler.event}":`, err)
       })
     }
 
-    host.addEventListener(handler.event, listener)
-    cleanups.push(() => host.removeEventListener(handler.event, listener))
+    // Host listener → emit path
+    const hostListener = (e: Event) => run(e)
+
+    // Doc listener → broadcast path; skip same-event relay loops only
+    const docListener = (e: Event) => {
+      const detail = (e as CustomEvent).detail ?? {}
+      const sameOrigin  = detail.__broadcastOrigin === host
+      const sameTrigger = detail.__broadcastTrigger === handler.event
+      // Only skip if this host rebroadcasts the exact event it's handling (relay loop)
+      // Cross-event: trigger != handler.event → ALLOW even if same origin
+      if (sameOrigin && sameTrigger) return
+      run(e)
+    }
+
+    host.addEventListener(handler.event, hostListener)
+    doc.addEventListener(handler.event, docListener)
+    cleanups.push(() => {
+      host.removeEventListener(handler.event, hostListener)
+      doc.removeEventListener(handler.event, docListener)
+    })
     console.log(`[LES] wired event handler: "${handler.event}"`)
   }
 

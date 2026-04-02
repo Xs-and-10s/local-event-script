@@ -202,7 +202,22 @@ function handleStateAggregation({ stateFeatures, fires, weatherPoints, hourIndex
         )
         const inside = turf.pointsWithinPolygon(firePts, turf.featureCollection([state]))
         const totalFRP = inside.features.reduce((s, f) => s + (f.properties.frp || 0), 0)
-        stateFire.push({ stateId, lon, lat, frp: totalFRP })
+
+        // FRP-weighted centroid of the actual hotspots — not the state geographic centroid.
+        // This points the tour camera to where fires are concentrated, not the state's center.
+        let fireLon = lon, fireLat = lat  // fallback: state centroid if weights collapse
+        if (inside.features.length > 0 && totalFRP > 0) {
+          let wLon = 0, wLat = 0
+          for (const f of inside.features) {
+            const w = f.properties.frp || 0
+            wLon += f.geometry.coordinates[0] * w
+            wLat += f.geometry.coordinates[1] * w
+          }
+          fireLon = wLon / totalFRP
+          fireLat = wLat / totalFRP
+        }
+
+        stateFire.push({ stateId, lon: fireLon, lat: fireLat, frp: totalFRP })
       }
 
       // Temperature: median of weather grid points within or nearest to state

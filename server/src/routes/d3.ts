@@ -376,8 +376,9 @@ d3.get('/flights', async (c) => {
     const flights = states
       .filter(s => s[5] !== null && s[6] !== null && !s[8]) // must have position, not on ground
       .map(s => ({
-        icao24:  s[0] as string,
-        callsign: (s[1] as string)?.trim() || null,
+        icao24:        s[0] as string,
+        callsign:      (s[1] as string)?.trim() || null,
+        origin_country: s[2] as string,  // used for domestic/international classification
         lon:     s[5] as number,
         lat:     s[6] as number,
         alt:     s[7] as number,   // barometric altitude (m)

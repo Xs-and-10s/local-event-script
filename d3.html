@@ -79,7 +79,7 @@
     }
 
     /* ── sandwich-layout: header / main / footer ────────────────────── */
-    sandwich-layout { width: 100%; }
+    sandwich-layout { width: 100%; height: 100dvh; }
 
     /* ── Header ─────────────────────────────────────────────────────── */
     #app-header {
@@ -133,18 +133,23 @@
       width: 36px; height: 36px;
       display: flex; align-items: center; justify-content: center;
       transition: border-color 0.15s, background 0.15s;
-      view-transition-name: settings-trigger;
+      /* view-transition-name assigned in JS during transition */
     }
     #hamburger-btn:hover {
       border-color: var(--accent);
       background: var(--accent-subtle);
     }
+    /* Hint pulse — 3× lime glow after initial shake+pan to invite exploration */
+    #hamburger-btn.hint-pulse { animation: hamburger-hint 1.4s ease-in-out 3; }
+    @keyframes hamburger-hint {
+      0%,100% { border-color: var(--border); box-shadow: none; }
+      50%      { border-color: oklch(0.87 0.23 135); box-shadow: 0 0 0 3px color-mix(in oklch, oklch(0.87 0.23 135) 25%, transparent); }
+    }
 
     /* ── Map container ──────────────────────────────────────────────── */
-    /* <main> is a 1fr grid item in sandwich-layout. To allow
-       #map-container { height:100% } to resolve, <main> must itself
-       carry a definite height. Setting height:100% + min-height:0
-       on the grid item propagates the track size downward. */
+    /* sandwich-layout has height:100dvh — that definite height propagates into
+       the grid rows. main gets the 1fr row; height:100% resolves against it.
+       min-height:0 lets map-container shrink when content is small. */
     sandwich-layout > main {
       height: 100%;
       min-height: 0;
@@ -208,14 +213,19 @@
     }
 
     /* ── Footer timeline ─────────────────────────────────────────────── */
+    #timeline-footer-wrapper {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      z-index: 10;
+      overflow: visible;  /* allow presence badges to extend above the footer */
+    }
     #timeline-footer {
-      position: relative; z-index: 10;
-      background: var(--glass-bg);
-      backdrop-filter: blur(var(--glass-blur));
-      -webkit-backdrop-filter: blur(var(--glass-blur));
-      border-top: 1px solid var(--glass-border);
+      background: color-mix(in oklch, oklch(0.10 0.025 135) 95%, transparent); /* matches header */
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border-top: 1px solid var(--border);
       padding: 0.75rem 1rem;
-      opacity: 0; /* LES fades in last */
+      opacity: 0; /* LES fades in after splash exits */
     }
 
     .timeline-track { position: relative; width: 100%; }
@@ -227,27 +237,39 @@
     }
 
     #presence-indicators {
-      position: absolute; inset: 0; pointer-events: none;
+      /* Anchor at scrubber thumb center (track is 4px, so 50% = 2px from top).
+         height: 0 + overflow: visible lets the badge extend upward above the footer. */
+      position: absolute;
+      top: 50%; left: 0; right: 0;
+      height: 0;
+      overflow: visible;
+      pointer-events: none;
     }
 
+    /* .presence-triangle and .presence-badge positioning is set by JS.
+       CSS handles only visual appearance. */
     .presence-triangle {
-      position: absolute; top: 0; transform: translateX(-50%);
+      position: absolute;
       width: 0; height: 0;
       border-left: 5px solid transparent; border-right: 5px solid transparent;
-      border-top: 8px solid currentColor;
-      transition: left 0.3s ease;
+      border-top: 8px solid currentColor;  /* ▼ downward-pointing triangle */
     }
     .presence-badge {
-      position: absolute; top: 10px; transform: translateX(-50%);
+      position: absolute;
       width: 20px; height: 20px; border-radius: 50%;
-      border: 2px solid currentColor; background: transparent;
+      border: 2px solid currentColor; background: rgba(0,0,0,0.35);
       display: flex; align-items: center; justify-content: center;
       font-size: 0.5rem; font-weight: 700; color: inherit;
     }
-    .presence-badge.is-pinned { animation: badge-pulse 2s ease-in-out infinite; }
+    .presence-badge.is-pinned {
+      animation: badge-pulse 2s ease-in-out infinite;
+      /* Scale from bottom-center so the badge bottom stays fixed at the
+         triangle tip; the badge grows upward only — no vertical jank. */
+      transform-origin: bottom center;
+    }
     @keyframes badge-pulse {
-      0%,100% { box-shadow: 0 0 0 0 color-mix(in oklch, currentColor 50%, transparent); transform: translateX(-50%) scale(1); }
-      50%      { box-shadow: 0 0 0 4px color-mix(in oklch, currentColor 20%, transparent); transform: translateX(-50%) scale(1.25); }
+      0%,100% { box-shadow: 0 0 0 0 color-mix(in oklch, currentColor 50%, transparent); transform: scale(1); }
+      50%      { box-shadow: 0 0 0 5px color-mix(in oklch, currentColor 20%, transparent); transform: scale(1.3); }
     }
 
     .timeline-controls {
@@ -375,7 +397,7 @@
       place-items: center;   /* centers .modal-panel in the viewport */
       opacity: 0;
       pointer-events: none;
-      view-transition-name: settings-panel;
+      /* view-transition-name assigned in JS during transition */
       transition: opacity 0.2s ease;
     }
     #settings-modal.is-open {
@@ -384,9 +406,9 @@
     }
 
     .modal-panel {
-      background: var(--glass-bg);
-      backdrop-filter: blur(var(--glass-blur));
-      -webkit-backdrop-filter: blur(var(--glass-blur));
+      background: color-mix(in oklch, oklch(0.10 0.025 135) 95%, transparent); /* matches header/footer */
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       border: 1px solid var(--glass-border);
       border-radius: var(--modal-radius);
       padding: 1.25rem;
@@ -451,14 +473,28 @@
     .audio-controls { display: flex; align-items: center; gap: 0.5rem; }
     .audio-label { font-size: 0.72rem; color: var(--muted); flex: 1; }
 
-    /* ── View Transitions — hamburger ↔ modal ───────────────────────── */
+    /* ── View Transitions — hamburger ↔ modal morph ─────────────────── */
     @supports (view-transition-name: none) {
-      ::view-transition-old(settings-trigger),
-      ::view-transition-new(settings-trigger),
-      ::view-transition-old(settings-panel),
-      ::view-transition-new(settings-panel) {
-        animation-duration: 280ms;
+      /* The shared name "settings-morph" is set in JS just before & after
+         the transition, so the browser can FLIP between the two rects. */
+      ::view-transition-group(settings-morph) {
+        animation-duration: 340ms;
         animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      /* Crossfade the content (old = hamburger icon, new = modal content) */
+      ::view-transition-old(settings-morph) {
+        animation: vt-fade-out 200ms ease forwards;
+      }
+      ::view-transition-new(settings-morph) {
+        animation: vt-fade-in 220ms ease 120ms both;
+      }
+      @keyframes vt-fade-out {
+        from { opacity: 1; }
+        to   { opacity: 0; }
+      }
+      @keyframes vt-fade-in {
+        from { opacity: 0; }
+        to   { opacity: 1; }
       }
     }
 
@@ -508,6 +544,35 @@
     tabindex="-1"
     aria-hidden="true"
   ></iframe>
+  <!-- YouTube callback must exist BEFORE iframe_api loads (async may fire before module) -->
+  <script>
+    // Stub collects the onReady signal; real handler in module script calls _tryYTPlay()
+    window._ytPlayRequested = false
+    window._ytReady = false
+    window._ytPlayer = null
+    window.onYouTubeIframeAPIReady = function() {
+      // Instantiate player; onReady fires when iframe is ready
+      window._ytPlayer = new YT.Player('yt-player', {
+        events: {
+          onReady: function() {
+            window._ytReady = true
+            console.log('[audio] YouTube player ready')
+            if (window._ytPlayRequested) {
+              console.log('[audio] playing — deferred from sign-in')
+              window._ytPlayer.playVideo()
+            }
+          },
+          onStateChange: function(e) {
+            var playing = e.data === YT.PlayerState.PLAYING
+            var pi = document.getElementById('audio-play-icon')
+            var pa = document.getElementById('audio-pause-icon')
+            if (pi) pi.style.display  = playing ? 'none' : ''
+            if (pa) pa.style.display = playing ? ''     : 'none'
+          },
+        },
+      })
+    }
+  </script>
   <script src="https://www.youtube.com/iframe_api" async></script>
 
   <!--
@@ -621,7 +686,9 @@
     data-signals:strongestPOI="null"
     data-signals:shakeIntensity="0"
     data-signals:flightsEnabled="false"
-    data-signals:wEarthquake="0.5"
+    data-signals:flightsDomesticEnabled="false"
+    data-signals:flightsIntlEnabled="false"
+    data-signals:wEarthquake="0.59"
     data-signals:wFire="0.35"
     data-signals:wTemp="0.15"
     data-signals:pinnedWeights="{ eq: false, fire: false, temp: false }"
@@ -655,21 +722,17 @@
       window._formatHour(h) is defined in the module script and uses the
       base time from the loaded weather data (or a placeholder before load).
     -->
-    <!--
-      call window.updateTimeDisplay(h) instead of bare signal assignment.
-      LES parser doesn't support $signal = expr; use call for JS-side effects.
-    -->
-    <on-signal
-      name="$currentHour"
-      handle="`
-        call window.updateTimeDisplay($currentHour)
-      `"
-    ></on-signal>
+    <!-- Commands — all window.* invocations go through a named command -->
+    <local-command name="timeline:update-display" do="`call window.updateTimeDisplay($currentHour)`"></local-command>
+    <local-command name="timeline:play-cmd"       do="`call window.timelinePlay`"></local-command>
+    <local-command name="timeline:pause-cmd"      do="`call window.timelinePause`"></local-command>
+    <local-command name="timeline:speed-cmd"      do="`call window.timelineSpeedCycle`"></local-command>
 
-    <!-- Registered commands — events call these; commands call window.* -->
-    <local-command name="timeline:play-cmd"  do="`call window.timelinePlay`"></local-command>
-    <local-command name="timeline:pause-cmd" do="`call window.timelinePause`"></local-command>
-    <local-command name="timeline:speed-cmd" do="`call window.timelineSpeedCycle`"></local-command>
+    <!--
+      Signal change fires a command, not window.* directly.
+      Event (signal changed) → command (update display) → window.* — clean CQRS.
+    -->
+    <on-signal name="$currentHour" handle="`call timeline:update-display`"></on-signal>
 
     <on-event name="timeline:play"        handle="`call timeline:play-cmd`"></on-event>
     <on-event name="timeline:pause"       handle="`call timeline:pause-cmd`"></on-event>
@@ -749,7 +812,7 @@
     role="dialog"
     aria-modal="true"
     aria-label="Map settings"
-    aria-hidden="true"
+    inert
   >
     <div class="modal-panel">
 
@@ -782,59 +845,48 @@
           <button class="toggle-switch is-on" data-layer="seismic" aria-label="Toggle seismic layer" aria-pressed="true"></button>
         </div>
         <div class="layer-row">
-          <span class="layer-label"><span class="layer-swatch" style="background:var(--lime-bright)"></span>Spikes</span>
+          <span class="layer-label">
+              <svg width="10" height="10" viewBox="0 0 10 10" style="flex-shrink:0;border-radius:2px;overflow:hidden" aria-hidden="true">
+                <!-- Three diagonal bands left→right: lime (eq), white (future), fire-orange (wildfire) -->
+                <polygon points="0,0 4,0 2,10 0,10" fill="#8cf43e"/>
+                <polygon points="4,0 8,0 6,10 2,10" fill="rgba(255,255,255,0.92)"/>
+                <polygon points="8,0 10,0 10,10 6,10" fill="#ff7241"/>
+              </svg>
+              Spikes
+            </span>
           <button class="toggle-switch is-on" data-layer="spikes" aria-label="Toggle spike layer" aria-pressed="true"></button>
         </div>
         <div class="layer-row">
           <span class="layer-label">
-            <span class="layer-swatch" style="background:#88aaff"></span>Flights
+            <span class="layer-swatch" style="background:#88aaff"></span>Domestic flights
             <span style="font-size:0.65rem;color:var(--muted)">(needs OpenSky key)</span>
           </span>
-          <button class="toggle-switch" data-layer="flights" aria-label="Toggle flight layer" aria-pressed="false"></button>
+          <button class="toggle-switch" data-layer="flights-domestic" aria-label="Toggle domestic flight layer" aria-pressed="false"></button>
+        </div>
+        <div class="layer-row">
+          <span class="layer-label">
+            <span class="layer-swatch" style="background:#9955ff"></span>International flights
+            <span style="font-size:0.65rem;color:var(--muted)">(needs OpenSky key)</span>
+          </span>
+          <button class="toggle-switch" data-layer="flights-international" aria-label="Toggle international flight layer" aria-pressed="false"></button>
         </div>
       </div>
 
-      <!-- POI focus weights -->
+      <!-- POI focus weights — two sliders always sum to 1.0 -->
       <div class="modal-section">
         <p class="modal-section-label">Camera focus weights</p>
         <p style="font-size:0.72rem;color:var(--muted);margin:0 0 0.5rem">
-          Must sum to 1.0. Pin two sliders to move only the third.
+          Moving either slider adjusts the other automatically.
         </p>
         <div class="weight-row">
           <span class="weight-label">Earthquake</span>
-          <input class="weight-slider" type="range" id="w-eq"   min="0" max="1" step="0.01" value="0.50">
-          <span class="weight-value" id="wv-eq">0.50</span>
-          <button class="pin-btn" data-weight="eq" aria-label="Pin earthquake weight" title="Pin this weight">
-            <svg width="12" height="14" viewBox="0 0 12 14" fill="none" aria-hidden="true">
-              <circle cx="6" cy="3" r="2.5" stroke="currentColor" stroke-width="1.2"/>
-              <line x1="6" y1="5.5" x2="6" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-              <line x1="3" y1="5.5" x2="9" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-            </svg>
-          </button>
+          <input class="weight-slider" type="range" id="w-eq" min="0" max="1" step="0.01" value="0.59">
+          <span class="weight-value" id="wv-eq">0.59</span>
         </div>
         <div class="weight-row">
           <span class="weight-label">Wildfire</span>
-          <input class="weight-slider" type="range" id="w-fire" min="0" max="1" step="0.01" value="0.35">
-          <span class="weight-value" id="wv-fire">0.35</span>
-          <button class="pin-btn" data-weight="fire" aria-label="Pin wildfire weight" title="Pin this weight">
-            <svg width="12" height="14" viewBox="0 0 12 14" fill="none" aria-hidden="true">
-              <circle cx="6" cy="3" r="2.5" stroke="currentColor" stroke-width="1.2"/>
-              <line x1="6" y1="5.5" x2="6" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-              <line x1="3" y1="5.5" x2="9" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-            </svg>
-          </button>
-        </div>
-        <div class="weight-row">
-          <span class="weight-label">Temperature</span>
-          <input class="weight-slider" type="range" id="w-temp" min="0" max="1" step="0.01" value="0.15">
-          <span class="weight-value" id="wv-temp">0.15</span>
-          <button class="pin-btn" data-weight="temp" aria-label="Pin temperature weight" title="Pin this weight">
-            <svg width="12" height="14" viewBox="0 0 12 14" fill="none" aria-hidden="true">
-              <circle cx="6" cy="3" r="2.5" stroke="currentColor" stroke-width="1.2"/>
-              <line x1="6" y1="5.5" x2="6" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-              <line x1="3" y1="5.5" x2="9" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-            </svg>
-          </button>
+          <input class="weight-slider" type="range" id="w-fire" min="0" max="1" step="0.01" value="0.41">
+          <span class="weight-value" id="wv-fire">0.41</span>
         </div>
       </div>
 
@@ -938,20 +990,38 @@
           <g id="layer-seismic" class="map-layer"></g>
           <!-- Layer 5: borders — above seismic rings, always legible -->
           <g id="layer-borders" class="map-layer"></g>
-          <!-- Layer 6: spikes — top of stack, always legible -->
+          <!-- Layer 6: spikes — above all data layers -->
           <g id="layer-spikes"  class="map-layer">
             <g id="spikes-seismic"></g>
             <g id="spikes-fire"></g>
             <g id="spikes-temp"></g>
           </g>
+          <!-- Layer 7: user presence — always topmost, never clipped -->
+          <g id="layer-user" style="opacity:1"></g>
         </svg>
         <canvas id="flights-canvas" aria-hidden="true"></canvas>
       </div>
     </main>
 
-    <!-- Footer timeline -->
-    <footer>
-      <div id="timeline-footer">
+  </sandwich-layout>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       TIMELINE FOOTER — position:fixed, overlays bottom of map.
+       Using position:fixed rather than sandwich footer slot avoids
+       the 100dvh grid conflict entirely, while keeping sandwich-layout
+       for the header/main structure. The overlay-layout approach (TDS)
+       would require overlay-layout to support align-self:end on children;
+       in v0.2.0 it uses place-items:center which doesn't support this.
+       DIAGNOSIS: overlay-layout places all children at grid-area:"stack"
+       with place-items:center — children can't use align-self to anchor
+       to bottom without an explicit CSS override on the child. So the
+       TDS-native solution is: keep sandwich for header+main, use
+       position:fixed for the footer overlay (the glassmorphic overlay
+       style already implies fixed positioning semantically).
+       Filed for TDS: overlay-layout needs an `align` prop or slot hints.
+       ═══════════════════════════════════════════════════════════════ -->
+  <div id="timeline-footer-wrapper">
+    <div id="timeline-footer">
         <stacked-layout gap="xs">
 
           <div class="timeline-track" role="group" aria-label="Timeline scrubber">
@@ -999,9 +1069,7 @@
 
         </stacked-layout>
       </div>
-    </footer>
-
-  </sandwich-layout>
+    </div><!-- /#timeline-footer-wrapper -->
 
   <!-- Attribution -->
   <div id="attribution" aria-label="Data sources">
@@ -1062,6 +1130,8 @@
       window._signedIn = true
       window._signedInName = name
       console.log('[d3] sign-in:', name)
+      window.plotUserLocation()
+      renderSelfBadge()
       // Start a post-sign-in footer fallback — if choreography fails
       // within 12s of sign-in, force the footer visible.
       setTimeout(() => {
@@ -1076,26 +1146,76 @@
     })
 
     // ── Modal open/close — with View Transition if supported ─────────────
+    // ── Step 10: Hamburger ↔ modal morph via View Transitions ────────────
+    //
+    // Both elements briefly share view-transition-name="settings-morph" so the
+    // browser captures the hamburger rect as "old" and the modal panel rect as
+    // "new" and automatically FLIP-tweens between them (position + size +
+    // border-radius all interpolate for free).
+    //
+    //  OPEN:  assign name to hamburger → startViewTransition → assign to panel
+    //  CLOSE: assign name to panel     → startViewTransition → assign to hamburger
+
+    const hamburgerBtn  = document.getElementById('hamburger-btn')
+    const settingsModal = document.getElementById('settings-modal')
+    const modalPanel    = settingsModal?.querySelector('.modal-panel')
+    const modalBackdrop = document.getElementById('modal-backdrop')
+    const VT_NAME       = 'settings-morph'
+
     function openModal() {
-      const run = () => {
-        document.getElementById('settings-modal').classList.add('is-open')
-        document.getElementById('settings-modal').setAttribute('aria-hidden', 'false')
-        document.getElementById('modal-backdrop').classList.add('is-open')
-        document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'true')
+      if (!document.startViewTransition) {
+        // No VT support — plain show
+        settingsModal.classList.add('is-open')
+        settingsModal.removeAttribute('inert')
+        modalBackdrop.classList.add('is-open')
+        hamburgerBtn.setAttribute('aria-expanded', 'true')
+        return
       }
-      if (document.startViewTransition) document.startViewTransition(run)
-      else run()
+
+      // Give the hamburger button the VT name — it becomes the "old" snapshot
+      hamburgerBtn.style.viewTransitionName = VT_NAME
+
+      const vt = document.startViewTransition(() => {
+        // DOM mutation: show modal, hide hamburger name, give panel the name
+        hamburgerBtn.style.viewTransitionName = ''
+        settingsModal.classList.add('is-open')
+        settingsModal.removeAttribute('inert')
+        modalBackdrop.classList.add('is-open')
+        hamburgerBtn.setAttribute('aria-expanded', 'true')
+        if (modalPanel) modalPanel.style.viewTransitionName = VT_NAME
+      })
+
+      vt.finished.finally(() => {
+        // Clean up — remove name so it doesn't interfere with future transitions
+        if (modalPanel) modalPanel.style.viewTransitionName = ''
+      })
     }
 
     function closeModal() {
-      const run = () => {
-        document.getElementById('settings-modal').classList.remove('is-open')
-        document.getElementById('settings-modal').setAttribute('aria-hidden', 'true')
-        document.getElementById('modal-backdrop').classList.remove('is-open')
-        document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'false')
+      if (!document.startViewTransition) {
+        settingsModal.classList.remove('is-open')
+        settingsModal.setAttribute('inert', '')
+        modalBackdrop.classList.remove('is-open')
+        hamburgerBtn.setAttribute('aria-expanded', 'false')
+        return
       }
-      if (document.startViewTransition) document.startViewTransition(run)
-      else run()
+
+      // Give the modal panel the VT name — it becomes the "old" snapshot
+      if (modalPanel) modalPanel.style.viewTransitionName = VT_NAME
+
+      const vt = document.startViewTransition(() => {
+        // DOM mutation: hide modal, give hamburger the name
+        if (modalPanel) modalPanel.style.viewTransitionName = ''
+        settingsModal.classList.remove('is-open')
+        settingsModal.setAttribute('inert', '')
+        modalBackdrop.classList.remove('is-open')
+        hamburgerBtn.setAttribute('aria-expanded', 'false')
+        hamburgerBtn.style.viewTransitionName = VT_NAME
+      })
+
+      vt.finished.finally(() => {
+        hamburgerBtn.style.viewTransitionName = ''
+      })
     }
 
     document.getElementById('hamburger-btn').addEventListener('click', openModal)
@@ -1139,68 +1259,48 @@
       })
     })
 
-    // ── Weight slider live display (pin logic added in Step 9) ─────────
-    for (const [id, valId] of [['w-eq','wv-eq'],['w-fire','wv-fire'],['w-temp','wv-temp']]) {
-      document.getElementById(id).addEventListener('input', e => {
+    // ── Weight slider live display (eq + fire only; temp removed) ───────
+    for (const [id, valId] of [['w-eq','wv-eq'],['w-fire','wv-fire']]) {
+      document.getElementById(id)?.addEventListener('input', e => {
         document.getElementById(valId).textContent = parseFloat(e.target.value).toFixed(2)
       })
     }
 
     // ─────────────────────────────────────────────────────────────────
     // ── Audio (YouTube IFrame API) ────────────────────────────────────────
-    // The YouTube iframe is permanently offscreen. Audio starts after the
-    // sign-in user gesture (browser autoplay policy requires it).
-
-    let _ytPlayer = null
-    let _ytReady  = false
-
-    window.onYouTubeIframeAPIReady = function() {
-      _ytPlayer = new YT.Player('yt-player', {
-        events: {
-          onReady: () => {
-            _ytReady = true
-            console.log('[audio] YouTube player ready')
-            if (window._signedIn) _ytPlayer.playVideo()
-          },
-          onStateChange: e => {
-            const playing = e.data === YT.PlayerState.PLAYING
-            const playIcon  = document.getElementById('audio-play-icon')
-            const pauseIcon = document.getElementById('audio-pause-icon')
-            if (playIcon)  playIcon.style.display  = playing ? 'none' : ''
-            if (pauseIcon) pauseIcon.style.display = playing ? ''     : 'none'
-          },
-        },
-      })
-    }
-
-    // Unlock audio on sign-in user gesture
+    // Callback defined in sync <script> above iframe_api load to avoid timing race.
+    // Sign-in sets window._ytPlayRequested; callback checks and plays.
     document.getElementById('signin-submit').addEventListener('click', () => {
-      if (_ytReady && _ytPlayer) _ytPlayer.playVideo()
+      window._ytPlayRequested = true
+      if (window._ytReady && window._ytPlayer) {
+        console.log('[audio] playing — player ready + sign-in gesture received')
+        window._ytPlayer.playVideo()
+      }
     }, { capture: true })
 
     document.getElementById('audio-playpause-btn')?.addEventListener('click', () => {
-      if (!_ytPlayer) return
-      const state = _ytPlayer.getPlayerState?.()
-      if (state === YT.PlayerState.PLAYING) _ytPlayer.pauseVideo()
-      else _ytPlayer.playVideo()
+      if (!window._ytPlayer) return
+      const state = window._ytPlayer.getPlayerState?.()
+      if (state === YT.PlayerState.PLAYING) window._ytPlayer.pauseVideo()
+      else window._ytPlayer.playVideo()
     })
 
     document.getElementById('audio-restart-btn')?.addEventListener('click', () => {
-      if (!_ytPlayer) return
-      _ytPlayer.seekTo(0, true)
-      _ytPlayer.playVideo()
+      if (!window._ytPlayer) return
+      window._ytPlayer.seekTo(0, true)
+      window._ytPlayer.playVideo()
     })
 
     document.getElementById('audio-mute-btn')?.addEventListener('click', () => {
-      if (!_ytPlayer) return
+      if (!window._ytPlayer) return
       const volIcon  = document.getElementById('audio-vol-icon')
       const muteIcon = document.getElementById('audio-mute-icon')
-      if (_ytPlayer.isMuted()) {
-        _ytPlayer.unMute()
+      if (window._ytPlayer.isMuted()) {
+        window._ytPlayer.unMute()
         if (volIcon)  volIcon.style.display  = ''
         if (muteIcon) muteIcon.style.display = 'none'
       } else {
-        _ytPlayer.mute()
+        window._ytPlayer.mute()
         if (volIcon)  volIcon.style.display  = 'none'
         if (muteIcon) muteIcon.style.display = ''
       }
@@ -1325,7 +1425,7 @@
       // Wind goes BEFORE data fills so it reads as context, not data.
       // Borders go ABOVE data fills so they stay crisp.
       ;['layer-base','layer-wind','layer-temp','layer-fire',
-        'layer-seismic','layer-borders','layer-spikes'].forEach(id => {
+        'layer-seismic','layer-borders','layer-spikes','layer-user'].forEach(id => {
         zoomRoot.node().appendChild(document.getElementById(id))
       })
 
@@ -1595,17 +1695,19 @@
     // Temperature: muted steel blue → warm neutral → soft coral (10 stops)
     // Low chroma so it never fights fire's saturated orange-red.
     // oklch: L 0.40→0.78, C 0.08→0.05, H 240→25
+    // Temperature dot palette: cool cyan → lavender → hot magenta
+    // All bright/vivid — compensates for 1–2px dot size
     const TEMP_STOPS = [
-      '#2a4a6a',  // coldest  — muted steel blue
-      '#345a78',
-      '#3f6b83',
-      '#4d7d8a',
-      '#608f8c',
-      '#7b9e87',
-      '#99ab7e',
-      '#bab472',
-      '#d6b86b',
-      '#e8b06a',  // hottest  — soft warm coral (not red, not orange)
+      '#00e5ff',  // coldest — electric cyan
+      '#22ccee',
+      '#44b4e8',
+      '#7799e8',
+      '#9988ee',
+      '#bb77ee',
+      '#dd66ee',
+      '#ee55dd',
+      '#ff44cc',
+      '#ff22bb',  // hottest — hot magenta
     ]
     // Fire: amber (#db6d00) → red-orange (#ff7241), 5 stops
     const FIRE_STOPS = [
@@ -1633,46 +1735,154 @@
      *
      * @param {Array} stateTemp — [{stateId, lon, lat, temp}] from aggregation:state
      */
-    function drawTempLayer(stateTemp) {
-      if (!stateTemp || !stateTemp.length) return
-      const stateFeatures = window._mapData?.stateFeatures
-      if (!stateFeatures) return
+    // Temperature Voronoi: diverging transparency palette + Voronoi cell fills
+    //
+    // Design rationale: temperature is ambient CONTEXT, not a primary signal.
+    // The layer must whisper — present as atmospheric tone, never competing
+    // with fire or seismic event layers.
+    //
+    // Palette: cold (t<0.45) → muted teal, mid band → transparent,
+    //          hot (t>0.55) → muted burgundy-magenta.
+    // Wide transparent band keeps temperate regions silent.
+    // Both colors are desaturated so they don't read as events.
+    //
+    // CELL_ALPHA=0.03: just enough to register on #0f0f0f background without
+    // muddying event layers. Edges at 0.025 — barely visible structure.
+    // Dots hidden in transparent band to prevent false white-dot artifacts.
+    const CELL_ALPHA = 0.03
+    const EDGE_ALPHA = 0.025
 
-      // Build a lookup: stateId → temperature
-      const tempById = new Map(stateTemp.map(s => [s.stateId, s.temp]))
+    function drawTempDotsLayer(hourIndex) {
+      const h  = hourIndex || 0
+      const wx = window._data?.weather
+      if (!wx?.length) return
 
-      // Compute the actual data range for colour mapping
-      const temps  = stateTemp.map(s => s.temp)
-      const tMin   = Math.min(...temps)
-      const tMax   = Math.max(...temps)
-      const tSpan  = Math.max(1, tMax - tMin)
+      const pts = wx
+        .filter(p => p.hourly?.temp?.[h] != null && inCONUS(p.lon, p.lat))
+        .map(p => {
+          const proj = projection([p.lon, p.lat])
+          return proj ? { lon: p.lon, lat: p.lat, temp: p.hourly.temp[h], x: proj[0], y: proj[1] } : null
+        })
+        .filter(Boolean)
+      if (pts.length < 3) return
 
-      const colorForState = feat => {
-        const name = feat.properties?.name ?? String(feat.id)
-        const temp = tempById.get(name)
-        if (temp == null) return null
+      const temps = pts.map(p => p.temp)
+      const tMin  = Math.min(...temps)
+      const tMax  = Math.max(...temps)
+      const tSpan = Math.max(0.1, tMax - tMin)
+
+      // Diverging transparency scale — ambient context only.
+      // Both colors are muted/desaturated so they can't be mistaken for events.
+      // Wide transparent band (0.45–0.55) keeps temperate regions fully silent.
+      function tempCA(temp, maxAlpha) {
         const t = Math.max(0, Math.min(1, (temp - tMin) / tSpan))
-        return TEMP_STOPS[Math.round(t * 9)]
+        const COLD_THRESH = 0.45   // wider band → gentler island boundaries
+        const HOT_THRESH  = 0.55
+        if (t < COLD_THRESH) {
+          // Muted teal-cyan — reads as "cold atmospheric" not as a data event
+          const a = ((COLD_THRESH - t) / COLD_THRESH) * maxAlpha
+          return { color: '#4ec9d4', alpha: a }
+        } else if (t > HOT_THRESH) {
+          // Muted burgundy-magenta — warm, not alarming, doesn't fight fire orange
+          const a = ((t - HOT_THRESH) / (1 - HOT_THRESH)) * maxAlpha
+          return { color: '#c4006e', alpha: a }
+        } else {
+          return { color: null, alpha: 0 }  // null signals "don't render"
+        }
       }
 
-      const sel = d3.select('#layer-temp')
+      const { width, height } = mapContainer.getBoundingClientRect()
+      const delaunay = d3.Delaunay.from(pts, d => d.x, d => d.y)
+      const voronoi  = delaunay.voronoi([0, 0, width, height])
+      const sel      = d3.select('#layer-temp')
 
-      sel.selectAll('path.choro-temp')
-        .data(stateFeatures.features, d => d.id)
+      // ── Voronoi cell fills (nearest-neighbor = flat per cell) ─────────────
+      // Each cell's flat fill is the station's temperature color at CELL_ALPHA.
+      // The clip-path url(#clip-conus) on #layer-temp clips fills to CONUS.
+      sel.selectAll('path.temp-cell')
+        .data(pts, d => `${d.lon},${d.lat}`)
+        .join('path')
+          .attr('class', 'temp-cell')
+          .attr('d', (d, i) => voronoi.renderCell(i))
+          .attr('fill', d => tempCA(d.temp, 1).color ?? 'none')
+          .attr('fill-opacity', d => tempCA(d.temp, CELL_ALPHA).alpha)
+          .attr('stroke', 'none')
+
+      // ── Delaunay edges with 3-stop gradients ──────────────────────────────
+      // Gradient: colorA @ alpha=EDGE_ALPHA → transparent (if midband) → colorB
+      // Edges where both endpoints are transparent will be invisible — correct.
+      const edges = []
+      for (let e = 0; e < delaunay.halfedges.length; e++) {
+        const opp = delaunay.halfedges[e]
+        if (opp < e) continue
+        const i = delaunay.triangles[e]
+        const j = delaunay.triangles[opp === -1 ? e : opp]
+        if (i === j) continue
+        edges.push({ i, j, id: `vtg-${Math.min(i,j)}-${Math.max(i,j)}` })
+      }
+
+      const defs = sel.selectAll('defs.voronoi-defs').data([null])
+        .join('defs').attr('class', 'voronoi-defs')
+
+      const grads = defs.selectAll('linearGradient.teg')
+        .data(edges, d => d.id)
+        .join('linearGradient')
+          .attr('class', 'teg').attr('id', d => d.id)
+          .attr('gradientUnits', 'userSpaceOnUse')
+          .attr('x1', d => pts[d.i].x).attr('y1', d => pts[d.i].y)
+          .attr('x2', d => pts[d.j].x).attr('y2', d => pts[d.j].y)
+
+      // 3-stop gradient: endpoint A → midpoint transparent → endpoint B
+      // The midpoint stop at 50% ensures the transparency band is represented
+      // even on edges that cross from a cold island to a hot island.
+      grads.selectAll('stop.a').data(d => [d]).join('stop')
+        .attr('class', 'a').attr('offset', '0%')
+        .attr('stop-color', d => tempCA(pts[d.i].temp, EDGE_ALPHA).color)
+        .attr('stop-opacity', d => tempCA(pts[d.i].temp, EDGE_ALPHA).alpha)
+
+      grads.selectAll('stop.m').data(d => [d]).join('stop')
+        .attr('class', 'm').attr('offset', '50%')
+        .attr('stop-color', '#ffffff')
+        .attr('stop-opacity', 0)  // transparent at midpoint regardless
+
+      grads.selectAll('stop.b').data(d => [d]).join('stop')
+        .attr('class', 'b').attr('offset', '100%')
+        .attr('stop-color', d => tempCA(pts[d.j].temp, EDGE_ALPHA).color)
+        .attr('stop-opacity', d => tempCA(pts[d.j].temp, EDGE_ALPHA).alpha)
+
+      sel.selectAll('line.temp-edge')
+        .data(edges, d => d.id)
+        .join('line')
+          .attr('class', 'temp-edge')
+          .attr('x1', d => pts[d.i].x).attr('y1', d => pts[d.i].y)
+          .attr('x2', d => pts[d.j].x).attr('y2', d => pts[d.j].y)
+          .attr('stroke', d => `url(#${d.id})`)
+          .attr('stroke-width', 0.6)  // reduced from 1.0 — mesh is context, not signal
+          .attr('stroke-linecap', 'round')
+
+      // ── Source dots — only on colored stations, hidden in transparent band ──
+      // Transparent-band stations (color:null) get r=0 so they vanish entirely.
+      // This fixes the white-ghost-dot artifact where '#ffffff' rendered at 0.85.
+      sel.selectAll('circle.temp-dot')
+        .data(pts, d => `${d.lon},${d.lat}`)
         .join(
-          enter => enter.append('path').attr('class', 'choro-temp')
-            .attr('fill-opacity', 0),
+          enter => enter.append('circle').attr('class', 'temp-dot').attr('r', 0),
           update => update,
-          exit => exit.remove()
+          exit   => exit.remove()
         )
-        .attr('d', pathGen)
-        .attr('fill', d => colorForState(d) ?? 'none')
+        .attr('cx', d => d.x).attr('cy', d => d.y)
+        .attr('fill', d => tempCA(d.temp, 1).color ?? 'none')
         .attr('stroke', 'none')
-        .transition().duration(900).ease(d3.easeQuadOut)
-        // Low opacity: temperature is background context, not primary signal
-        .attr('fill-opacity', d => colorForState(d) ? 0.22 : 0)
+        .attr('opacity', 0.7)
+        .transition().duration(400)
+        .attr('r', d => tempCA(d.temp, 1).color ? 2 : 0)
 
       sel.style('opacity', '1')
+    }
+
+    // Back-compat shim — called from aggregation:state handler
+    function drawTempLayer(stateTemp) {
+      drawTempDotsLayer(0)
     }
 
     /**
@@ -1756,6 +1966,87 @@
         .attr('stroke-opacity', (d, i) => 0.08 + Math.pow(i / Math.max(1, n - 1), 0.9) * 0.75)
 
       sel.style('opacity', '1')
+
+      // ── Fire spikes at contour centroids ───────────────────────────────────
+      // Fire spike heights use the same unified scale as earthquake spikes.
+      // topFireScore = highest score among fire-type POIs, normalised against
+      // the global topScore so cross-type rank is preserved.
+      const _allPOIs       = window._topCONUSPOIs || []
+      const _topScore      = _allPOIs[0]?.score || 1
+      const _MIN_H         = 6, _MAX_H = 70
+      const _spikeH        = score => _MIN_H + (score / _topScore) * (_MAX_H - _MIN_H)
+      const _topFireScore  = Math.max(..._allPOIs.filter(p => p.type === 'fire').map(p => p.score), 0)
+
+      // Contours are ordered low→high density; topContours[n-1] is densest.
+      // Map contour index linearly to [0, topFireScore] so the densest
+      // contour spike matches the top fire POI height.
+      const maxVal  = topContours.length ? topContours[topContours.length - 1].value : 1
+      const fireSpH = val => {
+        const norm = Math.sqrt(val / Math.max(maxVal, 1e-9))  // 0–1 within fire data
+        const score = norm * (_topFireScore || _topScore * 0.5) // calibrated to POI score
+        return _spikeH(score)
+      }
+
+      // Each contour level is a MultiPolygon — one density band may cover
+      // multiple disconnected fire clusters. identityPath.centroid() averages
+      // ALL polygon centroids, landing between clusters (e.g. Virginia when
+      // fires are in Alabama + Arkansas). Fix: use the largest constituent
+      // polygon by screen area, placing the spike at the most prominent cluster.
+      const fireCentroids = topContours.map((contour, i) => {
+        let bestRing = null, bestArea = 0
+        for (const polyRings of (contour.coordinates || [])) {
+          const exterior = polyRings[0]
+          if (!exterior || exterior.length < 3) continue
+          const area = Math.abs(d3.polygonArea(exterior))
+          if (area > bestArea) { bestArea = area; bestRing = exterior }
+        }
+        if (!bestRing) return null
+        const [cx, cy] = d3.polygonCentroid(bestRing)
+        if (isNaN(cx) || isNaN(cy)) return null
+        const norm = i / Math.max(1, n - 1)
+        return { x: cx, y: cy, val: contour.value, norm, i }
+      }).filter(Boolean)
+
+      // Store geographic coordinates for computeCONUSPOI — fire POI tour stops
+      // will be derived from these same contour centroids so tour and spikes
+      // always point to the same locations.
+      if (projection?.invert) {
+        window._fireContourCentroids = fireCentroids.map(c => {
+          const geo = projection.invert([c.x, c.y])
+          return geo ? { lon: geo[0], lat: geo[1], norm: c.norm, val: c.val } : null
+        }).filter(Boolean)
+      }
+
+      const fSel = d3.select('#spikes-fire')
+
+      fSel.selectAll('circle.fire-dot')
+        .data(fireCentroids, d => `fdot-${d.i}`)
+        .join(
+          enter => enter.append('circle').attr('class', 'fire-dot').attr('r', 3.5),
+          update => update,
+          exit   => exit.remove()
+        )
+        .attr('cx', d => d.x).attr('cy', d => d.y)
+        .attr('fill', d => FIRE_STOPS[Math.min(4, Math.round(d.norm * 4))])
+        .attr('stroke', 'none')
+        .attr('opacity', d => 0.65 + d.norm * 0.25)
+
+      fSel.selectAll('path.spike-fire')
+        .data(fireCentroids, d => `fspike-${d.i}`)
+        .join(
+          enter => enter.append('path').attr('class', 'spike-fire').style('opacity', 0),
+          update => update,
+          exit   => exit.transition().duration(300).style('opacity', 0).remove()
+        )
+        .attr('d', d => {
+          const h = fireSpH(d.val), w = 3.5
+          return `M${d.x - w},${d.y} L${d.x},${d.y - h} L${d.x + w},${d.y}`
+        })
+        .attr('fill', d => FIRE_STOPS[Math.min(4, Math.round(d.norm * 4))])
+        .attr('stroke', FIRE_STOPS[4])
+        .attr('stroke-width', 1.2)
+        .transition().duration(700).ease(d3.easeBackOut.overshoot(1.8))
+        .style('opacity', d => 0.65 + d.norm * 0.25)
     }
 
     /**
@@ -1954,18 +2245,35 @@
       // understand that vertical marks = seismic events.
 
       const eqs    = (window._data.earthquakes || []).filter(eq => inCONUS(eq.lon, eq.lat))
-      const maxMag = eqs.length ? Math.max(...eqs.map(e => e.mag)) : 9
-      // Quadratic height: M5→small, M7→dramatic — same as D3 spike map
-      const eqH = mag => {
-        const norm = Math.max(0, mag - 3) / Math.max(1, maxMag - 3)
-        return 8 + norm * norm * 62
-      }
 
-      // Epicentre dot — solid, bright, anchors the spike to the ground
+      // ── Unified rank-driven spike heights ─────────────────────────────────
+      // window._topCONUSPOIs holds POIs sorted by score (rank-1 first).
+      // All spike types share MAX_H so cross-type rank is preserved:
+      // if fire POI #1 (score 0.35) outranks eq POI #1 (score 0.16),
+      // the tallest fire spike will be taller than the tallest eq spike.
+      const allPOIs    = window._topCONUSPOIs || []
+      const topScore   = allPOIs[0]?.score || 1   // normaliser across all types
+      const MAX_H      = 70                        // px — tallest possible spike
+      const MIN_H      = 6                         // px — shortest visible spike
+      const clamp01    = v => Math.max(0, Math.min(1, v))
+
+      // Score each earthquake the same way computeCONUSPOI does,
+      // using the current weight signals (or defaults).
+      const wEq = parseFloat(
+        document.getElementById('map-controller')
+          ?.getAttribute('data-signals:wearthquake') ?? '0.5'
+      ) || 0.5
+      const eqScore = mag => wEq * clamp01((mag - 3) / 6)
+
+      // Height: linear on score, relative to the global top score.
+      // All spike types feed into this same formula.
+      const spikeH = score => MIN_H + (score / topScore) * (MAX_H - MIN_H)
+
+      // Epicentre dot — radius matches spike base width so they read as one shape
       d3.select('#spikes-seismic').selectAll('circle.spike-dot')
         .data(eqs, d => `dot-${d.lon},${d.lat}`)
         .join(
-          enter => enter.append('circle').attr('class','spike-dot').attr('r', 2.8),
+          enter => enter.append('circle').attr('class','spike-dot').attr('r', 3.5),
           update => update,
           exit   => exit.remove()
         )
@@ -1973,13 +2281,12 @@
         .attr('stroke', 'none')
         .attr('cx', d => { const p = projection([d.lon,d.lat]); return p ? p[0] : -9999 })
         .attr('cy', d => { const p = projection([d.lon,d.lat]); return p ? p[1] : -9999 })
-        .attr('opacity', 0.95)
+        .attr('opacity', d => 0.65 + clamp01(eqScore(d.mag) / topScore) * 0.25)
 
-      // Triangular spike — D3 spike-map idiom (M-w,y L0,y-h Lw,y)
       const eqPath = d => {
         const p = projection([d.lon, d.lat])
         if (!p) return ''
-        const h = eqH(d.mag), w = 3.5
+        const h = spikeH(eqScore(d.mag)), w = 3.5
         return `M${p[0]-w},${p[1]} L${p[0]},${p[1]-h} L${p[0]+w},${p[1]}`
       }
       d3.select('#spikes-seismic').selectAll('path.spike-eq')
@@ -1989,16 +2296,18 @@
           update => update,
           exit   => exit.transition().duration(300).style('opacity', 0).remove()
         )
-        .attr('fill', d => SEISMIC_STOPS[Math.min(4,
-          Math.round(Math.max(0, d.mag-3) / Math.max(1, maxMag-3) * 4))])
-        .attr('stroke', SEISMIC_STOPS[3])
-        .attr('stroke-width', 0.5)
+        .attr('fill', d => SEISMIC_STOPS[Math.min(4, Math.round(clamp01(eqScore(d.mag)/topScore) * 4))])
+        .attr('stroke', SEISMIC_STOPS[4])
+        .attr('stroke-width', 1.2)
         .attr('d', eqPath)
         .transition().duration(700).ease(d3.easeBackOut.overshoot(1.8))
-        // Opacity 0.45–0.70 — present but not overwhelming
-        .style('opacity', d => 0.45 + (Math.max(0,d.mag-3)/Math.max(1,maxMag-3)) * 0.25)
+        .style('opacity', d => 0.65 + clamp01(eqScore(d.mag) / topScore) * 0.25)
 
-      // Clear fire and temp spike groups in case they have stale data
+      // Fire spikes drawn in drawFireLayer() alongside the contours —
+      // centroids are screen-space points derived from contourDensity output.
+      // (No per-state spikes; nothing to do here.)
+
+      // Clear all non-seismic spike groups
       d3.select('#spikes-fire').selectAll('*').remove()
       d3.select('#spikes-temp').selectAll('*').remove()
 
@@ -2021,26 +2330,55 @@
         candidates.push({ lon: eq.lon, lat: eq.lat, score, type: 'earthquake', mag: eq.mag })
       }
 
-      // Fire state centroids (already CONUS)
-      const agg = window._results?.['aggregation:state']
-      const frpMax = Math.max(1, ...(agg?.stateFire?.map(s => s.frp) || []))
-      for (const s of (agg?.stateFire || [])) {
-        if (!s.frp) continue
-        const score = w.fire * clamp(s.frp / frpMax, 0, 1)
-        candidates.push({ lon: s.lon, lat: s.lat, score, type: 'fire' })
+      // Fire POIs: derived from the same contour centroids that produce visible
+      // fire spikes — not state-FRP centroids. This guarantees that every fire
+      // POI the camera visits has a visible spike on the map, and spikes and
+      // tour stops always point to the same geographic location.
+      // _fireContourCentroids is set by drawFireLayer() which runs before
+      // computeCONUSPOI (fires data arrives before workers finish).
+      const fireCents = window._fireContourCentroids || []
+      if (fireCents.length) {
+        const maxNorm = Math.max(...fireCents.map(fc => fc.norm), 0.01)
+        for (const fc of fireCents) {
+          if (!inCONUS(fc.lon, fc.lat)) continue
+          const score = w.fire * (fc.norm / maxNorm)
+          candidates.push({ lon: fc.lon, lat: fc.lat, score, type: 'fire' })
+        }
+      } else {
+        // Fallback: state-FRP centroids if fire layer hasn't rendered yet
+        const agg = window._results?.['aggregation:state']
+        const frpMax = Math.max(1, ...(agg?.stateFire?.map(s => s.frp) || []))
+        for (const s of (agg?.stateFire || [])) {
+          if (!s.frp) continue
+          const score = w.fire * clamp(s.frp / frpMax, 0, 1)
+          candidates.push({ lon: s.lon, lat: s.lat, score, type: 'fire' })
+        }
       }
 
-      // Temp state centroids (already CONUS)
-      const tMin = Math.min(...(agg?.stateTemp?.map(s => s.temp) || [0]))
-      const tMax = Math.max(...(agg?.stateTemp?.map(s => s.temp) || [40]))
-      for (const s of (agg?.stateTemp || [])) {
-        if (s.temp == null) continue
-        const score = w.temp * clamp((s.temp - tMin) / Math.max(1, tMax - tMin), 0, 1)
-        candidates.push({ lon: s.lon, lat: s.lat, score, type: 'temperature' })
-      }
+      // Temperature is intentionally excluded from POI candidates.
+      // It is ambient background data (choropleth), not an event type.
+      // Only discrete events — earthquake, fire, and future: tornado/hurricane —
+      // are valid tour destinations. A temperature state centroid could
+      // coincide with the user's geolocation (grid-point aliasing), making it
+      // actively misleading to include.
 
-      if (!candidates.length) return null
-      return candidates.reduce((best, c) => c.score > best.score ? c : best, candidates[0])
+      if (!candidates.length) return []
+
+      // Deduplicate: reject candidates within MIN_DIST_DEG of a higher-ranked one.
+      // ~80km at CONUS latitudes (1deg lat ≈ 111km; using simple Euclidean in degrees).
+      const MIN_DIST_DEG = 0.75  // ~80km
+      const sorted = candidates.sort((a, b) => b.score - a.score)
+      const kept = []
+      for (const c of sorted) {
+        const tooClose = kept.some(k => {
+          const dlat = c.lat - k.lat
+          const dlon = (c.lon - k.lon) * Math.cos(k.lat * Math.PI / 180)
+          return Math.sqrt(dlat*dlat + dlon*dlon) < MIN_DIST_DEG
+        })
+        if (!tooClose) kept.push(c)
+        if (kept.length >= 3) break
+      }
+      return kept
     }
 
     // ── Master workers:result router ──────────────────────────────────────
@@ -2082,11 +2420,8 @@
         }
 
         case 'scoring:poi': {
-          // Re-compute CONUS-filtered POI and log it
-          const poi = computeCONUSPOI(result)
-          if (poi) {
-            console.log(`[d3] top CONUS POI: ${poi.type} @ ${poi.lon.toFixed(2)},${poi.lat.toFixed(2)} score=${poi.score.toFixed(3)}`)
-          }
+          // Store raw result; POI ranking computed after aggregation:state also arrives
+          // (fire + temp candidates require aggregation data — see analysis:computed block)
           break
         }
       }
@@ -2355,24 +2690,21 @@
       const EXPECTED = ['aggregation:state','scoring:poi']
       const have = EXPECTED.filter(t => window._results[t] !== undefined)
       if (have.length === EXPECTED.length) {
-        // Fire analysis:computed for LES observability
+        // Both aggregation:state and scoring:poi are in — compute POI ranking now.
+        // This guarantees fire + temperature candidates from aggregation:state are included.
+        const _pois = computeCONUSPOI(window._results['scoring:poi'])
+        window._topCONUSPOIs = _pois
+        window._topCONUSPOI  = _pois[0] || null
+        if (_pois.length) {
+          console.log(`[LES:trace] top ${_pois.length} CONUS POIs: ${_pois.map(p=>`${p.type}(${p.score.toFixed(2)}) @ ${p.lon.toFixed(2)},${p.lat.toFixed(2)}`).join(', ')}`)
+        }
+
+        // Fire analysis:computed so LES page-controller broadcasts page:data-ready
         document.getElementById('page-controller')?.dispatchEvent(
           new CustomEvent('analysis:computed', { bubbles: false })
         )
         markLoaded('li-analysis')
-
-        // LES handles page:data-ready via its event handler (executor fixed).
-        // JS fallback fires after 150ms ONLY if LES hasn't already started.
-        // LES dispatches page:data-ready synchronously via CustomEvent above,
-        // so by the time this setTimeout fires LES will have set _splashExited.
-        setTimeout(() => {
-          if (!window._splashExited && window.onPageDataReady) {
-            console.warn('[d3] LES did not handle page:data-ready — JS fallback firing')
-            window._splashExited = true
-            window.onPageDataReady()
-              .catch(err => console.warn('[d3] onPageDataReady fallback error:', err))
-          }
-        }, 150)
+        console.log('[LES:trace] analysis:computed → broadcast page:data-ready')
       }
     })
 
@@ -2396,6 +2728,12 @@
         splash.style.opacity    = '0'
         splash.style.transform  = 'translateY(28px)'
         splash.style.pointerEvents = 'none'
+        // Reveal footer as splash exits — don't gate it on layer transitions
+        const footer = document.getElementById('timeline-footer')
+        if (footer) {
+          footer.style.transition = 'opacity 0.6s ease 0.2s'
+          footer.style.opacity    = '1'
+        }
         setTimeout(() => {
           splash.style.display = 'none'
           resolve()
@@ -2403,20 +2741,9 @@
       })
     }
 
-    // ── Page data ready — JS fallback path ───────────────────────────────
-    // LES page:data-ready is now the PRIMARY path (executor fixed to await
-    // window.* calls). This JS function is kept as a belt-and-suspenders
-    // fallback in case the LES chain fails (e.g. sign-in before LES ready).
-    window.onPageDataReady = async function() {
-      console.log('[d3] onPageDataReady (JS fallback) — starting splash exit')
-      window._splashExited = true
-      await window.exitSplash()
-      // Fire shake+pan immediately after splash, concurrent with layer stagger
-      document.getElementById('map-controller')
-        ?.dispatchEvent(new CustomEvent('map:layers-ready', { bubbles: false }))
-      await window.enterLayersStagger()
-      console.log('[d3] JS fallback: entrance complete')
-    }
+    // window.onPageDataReady was a JS fallback. Removed — LES is the sole
+    // path now that the executor correctly awaits window.* Promises.
+    // If you see the splash stuck: check LES logs for page:data-ready.
 
     // ── Layer entrance stagger ────────────────────────────────────────────
     // Fade each layer in sequentially after the splash exits.
@@ -2437,13 +2764,6 @@
         mc.enterLayer('seismic', 500),
         mc.enterLayer('spikes',  500),
       ])
-      // Footer slides in
-      const footer = document.getElementById('timeline-footer')
-      if (footer) {
-        footer.style.transition = 'opacity 0.5s ease'
-        footer.style.opacity    = '1'
-      }
-      // Belt-and-suspenders: also mark SVG visible now
       d3.select('#map').style('opacity', '1')
     }
 
@@ -2496,88 +2816,252 @@
       })
     }
 
-        window.shakeAndPan = async function() {
-      const mc  = window.mapController
-      const eqs = (window._data?.earthquakes || [])
-        .filter(eq => inCONUS(eq.lon, eq.lat))
-        .sort((a, b) => b.mag - a.mag)
+    
+    // ── [5] User location dot ─────────────────────────────────────────────
+    // After sign-in, attempt geolocation. If user is in CONUS,
+    // plot a white pulsing dot on the map. Hover shows their name.
+    // LES event: page:data-ready → broadcast user:location-ready (if found)
+    window.plotUserLocation = function() {
+      if (!navigator.geolocation) return
+      const name = window._signedInName || 'You'
 
-      if (!eqs.length || !mc) {
-        console.log('[d3] shakeAndPan: no CONUS earthquakes or mapController missing')
+      navigator.geolocation.getCurrentPosition(pos => {
+        const { latitude: lat, longitude: lon } = pos.coords
+        if (!inCONUS(lon, lat)) return  // only plot if in CONUS
+
+        const proj = window.mapController?.projection
+        if (!proj) return
+        const pt = proj([lon, lat])
+        if (!pt) return
+        const [cx, cy] = pt
+
+        const svg = d3.select('#layer-user')  // topmost layer — always above spikes, fire, seismic
+
+        // White pulsing ring
+        const pulse = svg.append('circle')
+          .attr('id', 'user-location-pulse')
+          .attr('cx', cx).attr('cy', cy).attr('r', 8)
+          .attr('fill', 'none')
+          .attr('stroke', 'white')
+          .attr('stroke-width', 1.5)
+          .attr('opacity', 0.6)
+
+        // Solid white dot (center)
+        svg.append('circle')
+          .attr('id', 'user-location-dot')
+          .attr('cx', cx).attr('cy', cy).attr('r', 3)
+          .attr('fill', 'white')
+          .attr('stroke', 'none')
+          .attr('opacity', 0.9)
+
+        // Invisible hover target with tooltip
+        svg.append('circle')
+          .attr('cx', cx).attr('cy', cy).attr('r', 14)
+          .attr('fill', 'transparent')
+          .attr('stroke', 'none')
+          .attr('style', 'cursor: pointer')
+          .append('title')
+            .text(`📍 ${name}`)
+
+        // Infinite pulse animation via CSS keyframes on the ring
+        const kfId = 'user-loc-pulse-kf'
+        if (!document.getElementById(kfId)) {
+          const style = document.createElement('style')
+          style.id = kfId
+          style.textContent = `
+            @keyframes user-loc-pulse {
+              0%   { r: 4; opacity: 0.7; }
+              70%  { r: 18; opacity: 0; }
+              100% { r: 4; opacity: 0; }
+            }
+            #user-location-pulse { animation: user-loc-pulse 2s ease-out infinite; }
+          `
+          document.head.appendChild(style)
+        }
+
+        console.log(`[LES:trace] user location plotted @ ${lat.toFixed(2)},${lon.toFixed(2)}`)
+        document.getElementById('map-controller')
+          ?.dispatchEvent(new CustomEvent('user:location-ready', { bubbles: false }))
+      }, () => {
+        // Permission denied or unavailable — silent fail
+        console.log('[LES:trace] geolocation unavailable')
+      }, { timeout: 5000, maximumAge: 300000 })
+    }
+
+        window.shakeAndPan = async function() {
+      const mc   = window.mapController
+      const pois = (window._topCONUSPOIs || [])
+        .filter(p => p.type === 'earthquake' || p.type === 'fire')  // events only — never temperature or user location
+
+      if (!pois.length || !mc) {
+        console.log('[LES:trace] shakeAndPan: no CONUS POIs computed')
         return
       }
 
-      const strongest = eqs[0]
-      const score     = Math.max(0, Math.min(1, (strongest.mag - 3) / 6))
-      const intensity = Math.max(0.20, Math.min(1.0, (strongest.mag - 3) / 6))
-      console.log(`[d3] shakeAndPan M${strongest.mag.toFixed(1)} intensity=${intensity.toFixed(2)} score=${score.toFixed(2)}`)
+      console.log('[LES:trace] shakeAndPan → animating', pois.length, 'POIs (#3→#2→#1)')
 
-      // Shake and pan start simultaneously — they feel causally linked.
-      // shake: ~700–1000ms  |  pan: 1400ms  |  pulse: after pan
-      await Promise.all([
-        shakeSVG(intensity),
-        mc.panToPOI(strongest.lon, strongest.lat, score),
-      ])
+      // Animate in reverse order: #3 first (brief), #1 last (lingering).
+      const ordered = [...pois].reverse()  // [rank3, rank2, rank1]
 
-      // Pulse the epicentre dot after pan lands
-      await pulseEpicentre(strongest.lon, strongest.lat)
+      for (let i = 0; i < ordered.length; i++) {
+        const poi       = ordered[i]
+        const isFinal   = i === ordered.length - 1
+        const isEq      = poi.type === 'earthquake'
+        const intensity  = isEq ? Math.max(0.20, Math.min(1.0, (poi.mag - 3) / 6)) : 0
+        const zoomScale  = isFinal ? poi.score : poi.score * 0.6
+        const nextPOI    = ordered[i + 1]
+        const nextIsEq   = nextPOI?.type === 'earthquake'
+
+        console.log(`[LES:trace] POI ${i+1}/${ordered.length}: ${poi.type} score=${poi.score.toFixed(2)} eq=${isEq}`)
+
+        // Earthquake: start shake → brief pre-shake → pan concurrently → cancel shake
+        // This makes the rumble feel causal: ground shakes, THEN camera reacts.
+        let shakeAnim = null
+        if (isEq && intensity > 0) {
+          shakeAnim = startShake(intensity)             // shake starts
+          await new Promise(r => setTimeout(r, 50))    // 50ms: earthquake "arrives" before camera moves
+        }
+
+        await mc.panToPOI(poi.lon, poi.lat, zoomScale) // pan runs while shake continues
+
+        // Cancel shake cleanly — fill:'none' means no residual transform
+        if (shakeAnim) {
+          shakeAnim.cancel()
+          shakeAnim = null
+        }
+
+        if (isEq) await pulseEpicentre(poi.lon, poi.lat)
+
+        if (!isFinal) {
+          // Brief silence before next POI.
+          // Extra gap between consecutive earthquakes: the stillness makes
+          // each quake feel like a discrete event, not a continuous blur.
+          const gap = nextIsEq ? 220 : 400
+          await new Promise(r => setTimeout(r, gap))
+        }
+      }
+
+      // Final re-pan: settle at #1 POI with full zoom, then shake once more
+      const top = pois[0]
+      if (top && ordered.length > 1) {
+        let finalShake = null
+        if (top.type === 'earthquake') {
+          const fi = Math.max(0.20, Math.min(1.0, (top.mag - 3) / 6))
+          finalShake = startShake(fi)
+          await new Promise(r => setTimeout(r, 50))
+        }
+        await mc.panToPOI(top.lon, top.lat, top.score)
+        if (finalShake) { finalShake.cancel(); finalShake = null }
+        if (top.type === 'earthquake') await pulseEpicentre(top.lon, top.lat)
+      }
+
+      // [C] After tour: reset view to see full CONUS, then pulse hamburger
+      await mc.resetZoom()
+
+      // Hamburger hint pulse — lime border flashes 3× to invite exploration
+      const hbtn = document.getElementById('hamburger-btn')
+      if (hbtn) {
+        hbtn.classList.add('hint-pulse')
+        hbtn.addEventListener('animationend', () => hbtn.classList.remove('hint-pulse'), { once: true })
+      }
     }
 
-    // ── SVG shake implementation ──────────────────────────────────────────
-    // Injects a CSS keyframe animation directly onto the map SVG.
-    // Uses translateX/Y offsets that decay over ~600ms — feels seismic.
-    function shakeSVG(intensity) {
-      return new Promise(resolve => {
-        const svg  = document.getElementById('map')
-        if (!svg) { resolve(); return }
+    // ── SVG shake via Web Animations API ─────────────────────────────────────
+    // startShake(intensity) → Animation
+    //
+    // Returns the live Animation object so the caller can cancel() it at will.
+    // The animation runs for SHAKE_DUR ms — long enough to span a full 1400ms
+    // panToPOI transition. The caller cancels it after the pan completes so
+    // the shake stops exactly when the camera settles.
+    //
+    // composite:'add'  → adds shake translation on top of D3 zoom, no drift
+    // fill:'none'      → cancel() leaves zero residual transform
+    const SHAKE_DUR = 1700  // ms — longer than panToPOI (1400ms) so shake outlasts pan
+    function startShake(intensity) {
+      const target = document.getElementById('map')
+      if (!target) return null
 
-        // Amplitude: 18px at M9, 6px at M3 — strong enough to be unmistakable.
-        // High-frequency early then decaying — like real seismic P-wave then S-wave.
-        const amp = intensity * 18
-        const dur = 700 + intensity * 300  // 700–1000ms
+      const amp = intensity * 18
 
-        const frames = [
-          { pct:  0,  x:  0,          y:  0          },
-          { pct:  5,  x:  amp,        y: -amp * 0.7  },  // P-wave hit
-          { pct: 12,  x: -amp * 0.9,  y:  amp * 0.8  },
-          { pct: 18,  x:  amp * 0.85, y: -amp * 0.6  },
-          { pct: 25,  x: -amp * 0.7,  y:  amp * 0.5  },  // S-wave
-          { pct: 33,  x:  amp * 0.55, y: -amp * 0.45 },
-          { pct: 42,  x: -amp * 0.40, y:  amp * 0.35 },
-          { pct: 52,  x:  amp * 0.28, y: -amp * 0.22 },
-          { pct: 63,  x: -amp * 0.18, y:  amp * 0.14 },  // coda
-          { pct: 75,  x:  amp * 0.10, y: -amp * 0.08 },
-          { pct: 87,  x: -amp * 0.05, y:  amp * 0.04 },
-          { pct: 100, x:  0,          y:  0           },
-        ]
+      // P-wave → S-wave → coda decay pattern, spread across SHAKE_DUR.
+      // Offsets are unchanged — easing:'ease-out' still makes early frames
+      // more energetic. The longer duration just means the coda settles more
+      // gradually, which feels right for a shake that underlies a camera pan.
+      const keyframes = [
+        { transform: 'translate(0,0)',                             offset: 0    },
+        { transform: `translate(${amp}px,${-amp*.7}px)`,          offset: 0.05 },
+        { transform: `translate(${-amp*.9}px,${amp*.8}px)`,       offset: 0.12 },
+        { transform: `translate(${amp*.85}px,${-amp*.6}px)`,      offset: 0.18 },
+        { transform: `translate(${-amp*.7}px,${amp*.5}px)`,       offset: 0.25 },
+        { transform: `translate(${amp*.55}px,${-amp*.45}px)`,     offset: 0.33 },
+        { transform: `translate(${-amp*.40}px,${amp*.35}px)`,     offset: 0.42 },
+        { transform: `translate(${amp*.28}px,${-amp*.22}px)`,     offset: 0.52 },
+        { transform: `translate(${-amp*.18}px,${amp*.14}px)`,     offset: 0.63 },
+        { transform: `translate(${amp*.10}px,${-amp*.08}px)`,     offset: 0.75 },
+        { transform: `translate(${-amp*.05}px,${amp*.04}px)`,     offset: 0.87 },
+        { transform: 'translate(0,0)',                             offset: 1    },
+      ]
 
-        const kfStr = frames.map(f =>
-          `${f.pct}% { transform: translate(${f.x.toFixed(1)}px, ${f.y.toFixed(1)}px); }`
-        ).join(' ')
-
-        const styleEl = document.createElement('style')
-        styleEl.id = 'shake-kf'
-        styleEl.textContent = `@keyframes map-shake { ${kfStr} }`
-        document.head.appendChild(styleEl)
-
-        svg.style.animation = `map-shake ${dur}ms ease-out forwards`
-        setTimeout(() => {
-          svg.style.animation = ''
-          document.getElementById('shake-kf')?.remove()
-          resolve()
-        }, dur + 50)
+      return target.animate(keyframes, {
+        duration:  SHAKE_DUR,
+        easing:    'ease-out',
+        fill:      'none',      // no residual — cancel() is clean
+        composite: 'add',       // adds on top of D3 zoom transform, never conflicts
       })
     }
 
-    // ── Timeline controls ─────────────────────────────────────────────────
+
+    // ── [4] Ambient timeline shake ────────────────────────────────────────
+    // While the timeline plays, CONUS earthquakes produce a low-level looping
+    // shake proportional to the strongest earthquake. The shake loops via
+    // Web Animations API iterations:Infinity and is cancelled on pause.
+    let _ambientShakeAnim = null
+
+    function _startAmbientShake() {
+      if (_ambientShakeAnim) return  // already running
+      const eqs = (window._data?.earthquakes || []).filter(eq => inCONUS(eq.lon, eq.lat))
+      if (!eqs.length) return
+      const maxMag = Math.max(...eqs.map(e => e.mag))
+      const intensity = Math.max(0.05, Math.min(0.35, (maxMag - 3) / 6 * 0.4))
+      const target = document.getElementById('map')
+      if (!target) return
+      const amp = intensity * 18
+      _ambientShakeAnim = target.animate([
+        { transform: 'translate(0,0)' },
+        { transform: `translate(${amp}px,${-amp*.5}px)` },
+        { transform: `translate(${-amp*.7}px,${amp*.6}px)` },
+        { transform: `translate(${amp*.5}px,${-amp*.3}px)` },
+        { transform: `translate(${-amp*.3}px,${amp*.2}px)` },
+        { transform: 'translate(0,0)' },
+      ], { duration: 600, easing: 'ease-in-out', fill: 'none',
+           composite: 'add', iterations: Infinity })
+    }
+
+    function _stopAmbientShake() {
+      if (_ambientShakeAnim) { _ambientShakeAnim.cancel(); _ambientShakeAnim = null }
+    }
+
+    // Hook called from tick — starts shake on first tick if earthquakes present
+    window._tickShakeForHour = function(h) {
+      const eqs = (window._data?.earthquakes || []).filter(eq => inCONUS(eq.lon, eq.lat))
+      if (eqs.length && !_ambientShakeAnim) _startAmbientShake()
+      else if (!eqs.length) _stopAmbientShake()
+    }
+
+        // ── Timeline controls ─────────────────────────────────────────────────
     // Autoplay advances $currentHour by 1 every (autoPlaySpeed × 250ms).
     // $currentHour wraps at 167 (7 days of hourly data).
     let _playInterval = null
     const SPEEDS = [1, 2, 4, 8]  // multipliers; 1× = 250ms per tick
     let _speedIdx = 0
 
+    // _playing: synchronous flag checked by the button click handler.
+    // Checked before the async LES event path so pause is always crisp.
+    let _playing = false
+
     window.timelinePlay = function() {
-      if (_playInterval) return
+      if (_playInterval) return  // already playing
+      _playing = true
       const playBtn  = document.getElementById('play-pause-btn')
       const playIcon = document.getElementById('play-icon')
       const pauseIcon= document.getElementById('pause-icon')
@@ -2587,15 +3071,27 @@
       playBtn?.classList.add('is-active')
 
       const tick = () => {
+        if (!_playing) { clearInterval(_playInterval); _playInterval = null; return }
         const scrubber = document.getElementById('scrubber')
         if (!scrubber) return
         const next = (parseInt(scrubber.value) + 1) % 168
         scrubber.value = next
-        // Manually dispatch input event so Datastar picks up the binding change
         scrubber.dispatchEvent(new Event('input', { bubbles: true }))
         window.updateTimeDisplay(next)
-        // Re-run analysis at new hour (workers handle the slice)
-        window.runAnalysis(next)
+
+        // Per-tick layer updates — client-side only, no worker dispatch.
+        // Wind direction + speed changes every hour → redraw arrows.
+        drawWindLayer(next)
+
+        // Temperature dots — direct point render, no state aggregation needed
+        drawTempDotsLayer(next)
+
+        // Spikes use aggregation data (static per load) — no hourly variant
+        drawSpikesLayer(window._results?.['aggregation:state'] || {}, next)
+        // Update self badge to follow timeline position
+        renderSelfBadge()
+        // [4] Ambient earthquake shake while playing
+        window._tickShakeForHour?.(next)
       }
 
       const ms = Math.round(250 / SPEEDS[_speedIdx])
@@ -2603,14 +3099,26 @@
     }
 
     window.timelinePause = function() {
+      _playing = false       // synchronous — tick checks this immediately
       if (_playInterval) { clearInterval(_playInterval); _playInterval = null }
-      const playBtn  = document.getElementById('play-pause-btn')
-      const playIcon = document.getElementById('play-icon')
-      const pauseIcon= document.getElementById('pause-icon')
-      if (playBtn)  playBtn.setAttribute('aria-label', 'Play timeline')
-      if (playIcon) playIcon.style.display = ''
-      if (pauseIcon)pauseIcon.style.display = 'none'
-      playBtn?.classList.remove('is-active')
+      _stopAmbientShake()
+
+      // View Transition snap: visually commit to the current scrubber state
+      // with a crisp cross-fade, hiding any partial-tick lag.
+      const doSnap = () => {
+        const playBtn  = document.getElementById('play-pause-btn')
+        const playIcon = document.getElementById('play-icon')
+        const pauseIcon= document.getElementById('pause-icon')
+        if (playBtn)  playBtn.setAttribute('aria-label', 'Play timeline')
+        if (playIcon) playIcon.style.display = ''
+        if (pauseIcon)pauseIcon.style.display = 'none'
+        playBtn?.classList.remove('is-active')
+      }
+      if (document.startViewTransition) {
+        document.startViewTransition(doSnap)
+      } else {
+        doSnap()
+      }
     }
 
     window.timelineSpeedCycle = function() {
@@ -2625,10 +3133,21 @@
     }
 
     // ── Play/pause button ─────────────────────────────────────────────────
+    // Play/Pause button — wired here (also driven by LES timeline:play/pause events)
     document.getElementById('play-pause-btn')?.addEventListener('click', () => {
-      if (_playInterval) {
+      if (_playing) {
+        // Pause — straightforward
+        _playing = false
         fireLES('timeline-controller', 'timeline:pause')
       } else {
+        // Play: enforce Playing ∧ Pinned = ⊥ — unpin first if needed
+        if (window._isPinned) {
+          window._isPinned = false
+          document.getElementById('pin-datetime-btn')?.classList.remove('is-active')
+          const h = parseInt(document.getElementById('scrubber')?.value ?? '0')
+          syncPresence(h, false, null)
+          renderSelfBadge()
+        }
         fireLES('timeline-controller', 'timeline:play')
       }
     })
@@ -2638,21 +3157,18 @@
       fireLES('timeline-controller', 'timeline:speed-cycle')
     })
 
-    // ── markDataReady gate — also set _dataReady for the map fallback path
+    // ── markDataReady gate — sets _dataReady for use by other JS paths
+    // NOTE: does NOT trigger onPageDataReady. That fires only after analysis
+    // completes (workers done), via the analysis:computed dispatch block.
+    // Triggering here would bypass analysis and start the entrance sequence
+    // before spatial data (isobands, POI score) is computed.
     const _origMarkDataReady = window.markDataReady
     window.markDataReady = function(type) {
       _origMarkDataReady(type)
       const { earthquakes, weather, fires } = window._readyFlags
       if (earthquakes && weather && fires) {
         window._dataReady = true
-        // Belt-and-suspenders: if map was ready before data, and analysis:computed
-        // hasn't fired yet (workers still pending), trigger splash exit early.
-        // In practice analysis:computed fires first; this covers edge cases.
-        if (window._mapReady && !window._splashExited && window.onPageDataReady) {
-          window._splashExited = true
-          window.onPageDataReady()
-            .catch(err => console.warn('[d3] onPageDataReady (early) error:', err))
-        }
+        // No early trigger here — wait for analysis:computed
       }
     }
 
@@ -2681,47 +3197,111 @@
     }
 
     // ── Render presence indicators ────────────────────────────────────────
+    // ── Self presence badge ────────────────────────────────────────────────
+    // Always shown at the current scrubber position. Updates on every tick
+    // and scrubber input. Pulses when pinned.
+    function renderSelfBadge() {
+      if (!window._signedIn) return
+      const container = document.getElementById('presence-indicators')
+      if (!container) return
+
+      const h = parseInt(document.getElementById('scrubber')?.value ?? '0')
+      const pct = (Math.min(167, Math.max(0, h)) / 167) * 100
+      const raw = window._signedInName || '??'
+      const initials = raw.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
+      const pinned = window._isPinned ?? false
+
+      // Update existing self badge or create it
+      let self = document.getElementById('self-presence-wrapper')
+      if (!self) {
+        self = document.createElement('div')
+        self.id = 'self-presence-wrapper'
+
+        const tri = document.createElement('div')
+        tri.id = 'self-presence-tri'
+        tri.className = 'presence-triangle'
+        // Tip of triangle (▼) points DOWN at the thumb.
+        // top: -8px puts the base 8px above the anchor; tip lands at top: 0 = thumb center.
+        // left: -5px centers the 10px-wide base on the anchor.
+        tri.style.cssText = 'top: -8px; left: -5px; color: white;'
+        self.appendChild(tri)
+
+        const badge = document.createElement('div')
+        badge.id = 'self-presence-badge'
+        badge.className = 'presence-badge'
+        // Badge sits above the triangle: -(8px triangle + 2px gap + 20px badge) = -30px
+        // left: -10px centers the 20px badge on the anchor.
+        badge.style.cssText = 'top: -30px; left: -10px; color: white; border-color: white;'
+        badge.title = raw + ' (you)'
+        self.appendChild(badge)
+
+        container.appendChild(self)
+      }
+
+      // Wrapper is a zero-size anchor at the scrubber thumb center.
+      // Items positioned with negative top values to extend upward.
+      self.style.cssText = `
+        position: absolute;
+        left: ${pct}%;
+        top: 0;
+        width: 0; height: 0;
+        overflow: visible;
+        pointer-events: none;
+        z-index: 3;
+      `
+      const selfBadge = document.getElementById('self-presence-badge')
+      if (selfBadge) {
+        selfBadge.textContent = initials
+        selfBadge.className = 'presence-badge' + (pinned ? ' is-pinned' : '')
+        // Keep inline position styles, only update appearance-related properties
+        selfBadge.style.color = 'white'
+        selfBadge.style.borderColor = 'white'
+        selfBadge.title = raw + ' (you)'
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Called whenever $otherUsers changes (from SSE) or the current user
     // pins/unpins. Renders triangles + badges above the scrubber.
     function renderPresenceIndicators(users) {
       const container = document.getElementById('presence-indicators')
       if (!container) return
 
-      // Remove stale entries
-      container.innerHTML = ''
+      // Remove stale OTHER-user entries (keep self badge)
+      Array.from(container.children).forEach(el => {
+        if (el.id !== 'self-presence-wrapper') el.remove()
+      })
 
       for (const u of users) {
-        // Skip our own entry — we don't show ourselves on the track
+        // Skip our own entry — rendered separately by renderSelfBadge()
         if (u.id === _sessionId) continue
 
         const pct = (u.hour / 167) * 100
         const color = presenceColor(u.initials)
 
-        // Wrapper div at the correct horizontal position
+        // Zero-size anchor at thumb center; items extend upward via negative top
         const wrapper = document.createElement('div')
         wrapper.style.cssText = `
           position: absolute;
           left: ${pct}%;
           top: 0;
-          transform: translateX(-50%);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
+          width: 0; height: 0;
+          overflow: visible;
           pointer-events: none;
         `
 
-        // Triangle (pointing down toward the scrubber track)
+        // Triangle tip at top: 0 (thumb level), base 8px above
         const tri = document.createElement('div')
         tri.className = 'presence-triangle'
-        tri.style.color = color
+        tri.style.cssText = `top: -8px; left: -5px; color: ${color};`
         wrapper.appendChild(tri)
 
-        // Badge circle with initials
+        // Badge: 30px above thumb center (8px tri + 2px gap + 20px badge)
         const badge = document.createElement('div')
         badge.className = 'presence-badge' + (u.pinned ? ' is-pinned' : '')
-        badge.style.color = color
+        badge.style.cssText = `top: -30px; left: -10px; color: ${color}; border-color: ${color};`
         badge.textContent = u.initials.slice(0, 2).toUpperCase()
-        badge.title = u.initials   // tooltip on hover (native browser)
+        badge.title = u.initials
         wrapper.appendChild(badge)
 
         container.appendChild(wrapper)
@@ -2774,6 +3354,7 @@
       const h = parseInt(e.target.value)
       const pinned = window._isPinned ?? false
       syncPresence(h, pinned, pinned ? h : null)
+      renderSelfBadge()
     })
 
     // ── Pin datetime button ───────────────────────────────────────────────
@@ -2783,12 +3364,27 @@
 
     document.getElementById('pin-datetime-btn')?.addEventListener('click', () => {
       if (!window._signedIn) return
-      window._isPinned = !window._isPinned
-      const btn = document.getElementById('pin-datetime-btn')
-      btn?.classList.toggle('is-active', window._isPinned)
+      const wasPlaying = _playing
+      const wasPinned  = window._isPinned
+
+      if (wasPinned) {
+        // Unpin: → Playing (invariant: unpin always resumes play)
+        window._isPinned = false
+        document.getElementById('pin-datetime-btn')?.classList.remove('is-active')
+        fireLES('timeline-controller', 'timeline:play')
+      } else {
+        // Pin: pause if currently playing first, then pin
+        if (wasPlaying) {
+          _playing = false
+          fireLES('timeline-controller', 'timeline:pause')
+        }
+        window._isPinned = true
+        document.getElementById('pin-datetime-btn')?.classList.add('is-active')
+      }
 
       const h = parseInt(document.getElementById('scrubber')?.value ?? '0')
       syncPresence(h, window._isPinned, window._isPinned ? h : null)
+      renderSelfBadge()
     })
 
     // ── Wire presence start to sign-in ────────────────────────────────────
@@ -2814,16 +3410,8 @@
     //   (we prevent all-3 by auto-unpinning the last-touched when a 3rd pins)
     // ─────────────────────────────────────────────────────────────────────
 
-    const WEIGHT_IDS   = ['eq', 'fire', 'temp']
-    const pinState     = { eq: false, fire: false, temp: false }
-    let   lastPinned   = null  // tracks which was most recently pinned
-
-    function getWeights() {
-      return Object.fromEntries(WEIGHT_IDS.map(id => [
-        id, parseFloat(document.getElementById(`w-${id}`)?.value ?? '0')
-      ]))
-    }
-
+    // Two-slider weight system: eq + fire always sum to 1.0.
+    // Moving one automatically mirrors the other — no pinning needed.
     function setWeight(id, val) {
       const el = document.getElementById(`w-${id}`)
       const dv = document.getElementById(`wv-${id}`)
@@ -2832,84 +3420,26 @@
       if (dv) dv.textContent = clamped.toFixed(2)
     }
 
-    function updatePinVisuals() {
-      for (const id of WEIGHT_IDS) {
-        const btn = document.querySelector(`.pin-btn[data-weight="${id}"]`)
-        if (!btn) continue
-        btn.classList.toggle('is-pinned', pinState[id] === 'user')
-        btn.classList.toggle('is-system-pinned', pinState[id] === 'system')
-        btn.classList.toggle('is-pinned', pinState[id] !== false)
-        const slider = document.getElementById(`w-${id}`)
-        // Disable slider if system-pinned (auto-locked to fill remainder)
-        if (slider) slider.disabled = false  // never fully disable — allow inspection
-      }
+    function getWeights() {
+      const eq = parseFloat(document.getElementById('w-eq')?.value ?? '0.59')
+      return { eq, fire: 1 - eq, temp: 0 }
     }
 
-    // Called when slider `movedId` changes to `newVal`.
-    // Redistributes delta across unpinned siblings.
-    function redistributeWeights(movedId, newVal) {
-      const old     = getWeights()
-      const delta   = newVal - old[movedId]
-      const others  = WEIGHT_IDS.filter(id => id !== movedId && !pinState[id])
-
-      if (others.length === 0) {
-        // All others pinned — clamp moved slider to what's available
-        const available = WEIGHT_IDS
-          .filter(id => id !== movedId && pinState[id])
-          .reduce((s, id) => s - old[id], 1)
-        setWeight(movedId, Math.max(0, Math.min(available, newVal)))
-        return
-      }
-
-      // Proportional distribution: if others are [0.35, 0.15], and delta=-0.1,
-      // fire gets -0.07, temp gets -0.03 (proportional to their current values)
-      const totalOther = others.reduce((s, id) => s + old[id], 0)
-      setWeight(movedId, newVal)
-      for (const id of others) {
-        const share = totalOther > 0 ? old[id] / totalOther : 1 / others.length
-        setWeight(id, old[id] - delta * share)
-      }
-
-      // Normalise rounding errors — ensure sum = 1.0
-      const sum = WEIGHT_IDS.reduce((s, id) => s + parseFloat(document.getElementById(`w-${id}`)?.value ?? 0), 0)
-      if (Math.abs(sum - 1) > 0.001 && others.length > 0) {
-        const lastOther = others[others.length - 1]
-        const cur = parseFloat(document.getElementById(`w-${lastOther}`)?.value ?? 0)
-        setWeight(lastOther, cur + (1 - sum))
-      }
-    }
-
-    // Wire each weight slider
-    for (const id of WEIGHT_IDS) {
-      document.getElementById(`w-${id}`)?.addEventListener('input', e => {
-        redistributeWeights(id, parseFloat(e.target.value))
-      })
-    }
-
-    // Wire pin buttons
-    document.querySelectorAll('.pin-btn[data-weight]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.weight
-        const currentlyPinned = pinState[id] !== false
-        const pinnedCount = WEIGHT_IDS.filter(i => pinState[i] !== false).length
-
-        if (currentlyPinned) {
-          // Unpin this one
-          pinState[id] = false
-        } else {
-          // Pin this one
-          if (pinnedCount >= 2) {
-            // All 3 would be pinned — unpin the last-touched instead
-            if (lastPinned && lastPinned !== id) {
-              pinState[lastPinned] = false
-            }
-          }
-          pinState[id] = 'user'
-          lastPinned = id
-        }
-        updatePinVisuals()
-      })
+    // Wire eq slider — fire mirrors it
+    document.getElementById('w-eq')?.addEventListener('input', e => {
+      const val = Math.max(0, Math.min(1, parseFloat(e.target.value)))
+      setWeight('eq',   val)
+      setWeight('fire', 1 - val)
     })
+    // Wire fire slider — eq mirrors it
+    document.getElementById('w-fire')?.addEventListener('input', e => {
+      const val = Math.max(0, Math.min(1, parseFloat(e.target.value)))
+      setWeight('fire', val)
+      setWeight('eq',   1 - val)
+    })
+
+    // Pin buttons removed — 2-slider system needs no pinning
+    // Pin buttons removed — 2-slider linked system needs no pinning
 
     // ─────────────────────────────────────────────────────────────────────
     // END STEP 9
@@ -2962,8 +3492,8 @@
       // Map is ready — set flag. Splash exits via page:data-ready event
       // once data also finishes loading (driven by LES #page-controller).
       window._mapReady = true
-      // If data already finished before map was ready, trigger now
-      if (window._dataReady) window.exitSplash().then(() => window.enterLayersStagger())
+      // LES handles page:data-ready → splash:exit. No JS fallback here.
+      console.log('[LES:trace] map ready — waiting for analysis:computed via LES')
     }
 
     bootMap().catch(err => console.error('[d3] boot failed:', err))
