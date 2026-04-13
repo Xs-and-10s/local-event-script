@@ -2453,11 +2453,21 @@
     }
 
     // ── Fire a named event on a LES element from JS ───────────────────────
-    // LES on-event listeners on the host element hear these.
-    function fireLES(id, name) {
+    // Uses el.fire() so events are queued if the element hasn't finished
+    // initializing yet — no silent drops during the startup window.
+    function fireLES(id, name, ...payload) {
       const el = document.getElementById(id)
       if (!el) return
-      el.dispatchEvent(new CustomEvent(name, { bubbles: false }))
+      if (typeof el.fire === 'function') {
+        el.fire(name, payload)
+      } else {
+        // Fallback for non-upgraded elements (should not happen in practice)
+        el.dispatchEvent(new CustomEvent(name, {
+          detail: { payload },
+          bubbles: false,
+          composed: false,
+        }))
+      }
     }
 
     // ── Ready flags + all-ready gate ─────────────────────────────────────

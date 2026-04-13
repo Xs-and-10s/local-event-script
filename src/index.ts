@@ -32,6 +32,26 @@ export { OnSignal }         from '@elements/OnSignal.js'
 export { OnLoad, OnEnter, OnExit } from '@elements/Lifecycle.js'
 export { UseModule }        from '@elements/UseModule.js'
 
+// ─── Runtime utilities ────────────────────────────────────────────────────────
+
+/**
+ * Resolves once all LES custom elements are defined and ready to use.
+ *
+ * Primarily useful when loading LES via dynamic import() or from a CDN,
+ * where the caller cannot be certain the bundle has evaluated before
+ * attempting to create or interact with LES elements.
+ *
+ *   const { lesReady } = await import('./local-event-script.js')
+ *   await lesReady
+ *   // <local-event-script> is now defined; safe to attach elements
+ *
+ * When loading via a static <script type="module"> in <head>, elements are
+ * defined synchronously during module evaluation — lesReady resolves on the
+ * next microtask and is effectively immediate.
+ */
+export const lesReady: Promise<void> =
+  customElements.whenDefined('local-event-script').then(() => undefined)
+
 // ─── Type exports (for TypeScript consumers) ──────────────────────────────────
 export type { LESNode }                   from '@parser/ast.js'
 export type { LESModule, LESPrimitive }   from '@modules/types.js'

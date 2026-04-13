@@ -27,6 +27,13 @@ export class LocalEventScript extends HTMLElement {
   private _dsEffect: ((fn: () => void) => void) | undefined = undefined
   private _dsSignal: (<T>(name: string, init?: T) => { value: T }) | undefined = undefined
 
+  // ── Pre-init event queue ──────────────────────────────────────────────────
+  // Events fired via fire() before _init() completes wiring are queued here
+  // and replayed immediately after wireEventHandlers() runs. This prevents
+  // events from being silently dropped during the startup window.
+  private _preInitQueue: Array<{ event: string; payload: unknown[] }> = []
+  private _initComplete = false
+
   // ── Phase 2: LES tree wiring ───────────────────────────────────────────────
   // Parent reference set synchronously in connectedCallback (before microtask)
   // so the parent's _init() sees this child in _lesChildren when it runs.
@@ -58,6 +65,12 @@ export class LocalEventScript extends HTMLElement {
   static get observedAttributes(): string[] { return [] }
 
   connectedCallback(): void {
+    // Reset init state so a reconnected element starts fresh.
+    // NOTE: _preInitQueue is intentionally NOT reset here — events fired via
+    // fire() before appendChild() must survive into _init() so they can be
+    // replayed after wiring. _teardown() (called on disconnect) is where the
+    // queue is cleared, ensuring a clean slate on reconnection.
+    this._initComplete = false
     // Synchronous parent registration — must happen before the microtask
     // so the parent's _init() sees this child in _lesChildren when it awaits
     // children's lesReady. Uses closest() which walks up the real DOM.
@@ -112,6 +125,18 @@ export class LocalEventScript extends HTMLElement {
     this._cleanups.push(
       wireEventHandlers(this._wiring, this, () => this._ctx!)
     )
+
+    // Handlers are now wired — mark init complete and drain any queued events.
+    // Events fired via fire() during the startup window are replayed here,
+    // in arrival order, before the on-load lifecycle fires.
+    this._initComplete = true
+    if (this._preInitQueue.length > 0) {
+      const queued = this._preInitQueue.splice(0)
+      console.log(`[LES] ${this.id || '(no id)'}: draining ${queued.length} pre-init event(s)`)
+      for (const { event, payload } of queued) {
+        this.fire(event, payload)
+      }
+    }
 
     // Phase 5a: IntersectionObserver for on-enter / on-exit
     this._cleanups.push(
@@ -183,9 +208,11 @@ export class LocalEventScript extends HTMLElement {
     console.log('[LES] <local-event-script> disconnected', this.id || '(no id)')
     for (const cleanup of this._cleanups) cleanup()
     this._cleanups = []
-    this._config   = null
-    this._wiring   = null
-    this._ctx      = null
+    this._config      = null
+    this._wiring      = null
+    this._ctx         = null
+    this._initComplete = false
+    this._preInitQueue = []
     // Note: _lesChildren is NOT cleared — the children are still in the DOM
     // and will re-register on their own reconnect. _lesParent is cleared in
     // disconnectedCallback before _teardown() is called.
@@ -372,8 +399,20 @@ export class LocalEventScript extends HTMLElement {
 
   // ─── Public API ───────────────────────────────────────────────────────────
 
-  /** Fire a named local event into this LES instance from outside. */
+  /**
+   * Fire a named local event into this LES instance from outside.
+   *
+   * If called before _init() has completed wiring (i.e. during the startup
+   * window), the event is queued and replayed automatically once handlers
+   * are ready. This prevents silent event drops when external code calls
+   * fire() or fireLES() before the element has fully initialized.
+   */
   fire(event: string, payload: unknown[] = []): void {
+    if (!this._initComplete) {
+      console.log(`[LES] ${this.id || '(no id)'}: queued pre-init event "${event}"`)
+      this._preInitQueue.push({ event, payload })
+      return
+    }
     this.dispatchEvent(new CustomEvent(event, {
       detail: { payload }, bubbles: false, composed: false,
     }))
